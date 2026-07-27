@@ -6,6 +6,7 @@ const Redis = require('ioredis');
 require('dotenv').config();
 
 const app = express();
+app.use(require('cors')());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*" }
