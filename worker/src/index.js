@@ -165,7 +165,10 @@ async function checkLicense(request, env, { bind }) {
 
 // ---------- admin endpoints ----------
 async function admin(request, env, path) {
-  if (!env.ADMIN_API_KEY || !safeEqual(request.headers.get('x-admin-key'), env.ADMIN_API_KEY)) return fail(401, 'unauthorized');
+  // Trim both sides: a secret pasted into the dashboard often carries a stray space or newline.
+  const expected = String(env.ADMIN_API_KEY || '').trim();
+  if (!expected) return fail(503, 'admin_key_not_set');
+  if (!safeEqual((request.headers.get('x-admin-key') || '').trim(), expected)) return fail(401, 'unauthorized');
   await prepare(env);
   const url = new URL(request.url);
 
