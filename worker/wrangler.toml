@@ -1,0 +1,15 @@
+# POS licence server on Cloudflare Workers (free plan) + D1.
+# Deploy: Cloudflare dashboard -> Workers & Pages -> Create -> Import a repository
+#         (root directory: worker). See README.md in this folder.
+name = "pos-licensing"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pos-licensing"
+# No database_id: on the first deploy Wrangler creates the D1 database automatically
+# (automatic resource provisioning) and keeps using it afterwards.
+
+# ADMIN_API_KEY is a secret: set it in the dashboard (Worker -> Settings -> Variables and Secrets),
+# never in this file.

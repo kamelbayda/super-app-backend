@@ -14,6 +14,11 @@ The `licenses` table is created automatically on start.
 
 ## POS licensing
 
+> **Recommended: deploy the Cloudflare Worker in [`worker/`](worker/README.md).** It is free,
+> never sleeps, needs no terminal, and has a browser admin page at `/admin`. The Express
+> implementation below has the same API and remains an option if you run this service on
+> Railway or similar.
+
 The POS app no longer contains activation keys or a key generator. Keys live here:
 
 - Each key is random (`POS-XXXXX-XXXXX-XXXXX`), is either **year** (365 days from first
