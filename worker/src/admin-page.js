@@ -102,7 +102,7 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح' };
+const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح' };
 const errMsg = (e) => ERR[e.message] || ('خطأ: ' + e.message);
 const date = (s) => s ? new Date(s).toLocaleDateString('ar-LB') : '—';
 

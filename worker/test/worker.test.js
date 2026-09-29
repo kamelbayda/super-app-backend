@@ -16,7 +16,7 @@ const wrangler = join(process.cwd(), 'node_modules', '.bin', 'wrangler');
 
 let proc;
 test.before(async () => {
-  proc = spawn(wrangler, ['dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', `ADMIN_API_KEY:${ADMIN}`], { stdio: 'pipe' });
+  proc = spawn(wrangler, ['dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', `ADMIN_API_KEY:${ADMIN} `], { stdio: 'pipe' });
   for (let i = 0; i < 60; i++) {
     try { if ((await fetch(`${BASE}/api/health`)).ok) return; } catch {}
     await new Promise((r) => setTimeout(r, 1000));
@@ -51,6 +51,10 @@ test('licence API on Workers', async (t) => {
   await t.test('admin endpoints require the admin key', async () => {
     assert.equal((await post('/api/admin/licenses', { plan: 'year' })).status, 401);
     assert.equal((await post('/api/admin/licenses', { plan: 'year' }, { 'x-admin-key': 'nope' })).status, 401);
+  });
+
+  await t.test('admin key tolerates surrounding whitespace', async () => {
+    assert.equal((await post('/api/admin/licenses', { plan: 'year', count: 1, note: 'ws' }, { 'x-admin-key': `  ${ADMIN} ` })).status, 201);
   });
 
   const created = (await post('/api/admin/licenses', { plan: 'year', note: 'Al Amin', count: 2 }, admin)).body.licenses;

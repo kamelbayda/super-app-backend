@@ -14,12 +14,14 @@ It has the same API as the Express version in `../licensing`, so the POS app and
    - روح على **Workers & Pages ← Create application ← Import a repository**.
    - اربط GitHub واختار `kamelbayda/super-app-backend`.
    - **Project name:** `pos-licensing` (لازم يطابق `name` بـ `wrangler.toml`).
-   - **Root directory:** `worker`
+   - **Root directory / Path:** `worker`
    - كبس **Save and Deploy**. قاعدة D1 بتنعمل لحالها بأول نشر.
-3. **مفتاح الإدارة:**
-   - بالـ Worker روح على **Settings ← Variables and Secrets ← Add**.
-   - اختار النوع **Secret**، والاسم `ADMIN_API_KEY`، والقيمة كلمة سر طويلة عشوائية بتختارها إنت.
-   - كبس **Deploy**.
+3. **مفتاح الإدارة** (لوحة Cloudflare الجديدة ما فيها Secret بالـ Bindings، فالـ build بيحطه):
+   - **Settings ← Builds ← Variables and secrets ← Add:** النوع **Secret**، الاسم `ADMIN_API_KEY`،
+     والقيمة كلمة سر طويلة بتختارها إنت (اكتبها بإيدك).
+   - **Settings ← Builds ← Deploy command:**
+     `npx wrangler deploy && printf '%s' "$ADMIN_API_KEY" | npx wrangler secret put ADMIN_API_KEY`
+   - **Deployments ← ⋯ ← Retry build.** لتغيير الكلمة بعدين: غيّرها بنفس المحل وأعد الـ build.
 4. **فتح صفحة الإدارة:** `https://pos-licensing.<اسم-حسابك>.workers.dev/admin`
    - فوت بمفتاح الإدارة.
    - كبس **نسخ إعدادات البرنامج (.env)**، وحطهن بملف `.env` تبع الـ POS قبل ما تعمل build.
