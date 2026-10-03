@@ -70,7 +70,8 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
         <div><label for="note">اسم المحل / ملاحظة</label><input id="note" placeholder="مثلاً: سوبرماركت البركة"></div>
         <div style="flex:0 1 140px"><label for="plan">النوع</label>
           <select id="plan"><option value="year">سنوي</option><option value="life">مدى الحياة</option></select></div>
-        <div style="flex:0 1 90px"><label for="count">العدد</label><input id="count" type="number" min="1" max="100" value="1"></div>
+        <div style="flex:0 1 110px"><label for="maxDevices">عدد الأجهزة</label><input id="maxDevices" type="number" min="1" max="20" value="1"></div>
+        <div style="flex:0 1 90px"><label for="count">عدد المفاتيح</label><input id="count" type="number" min="1" max="100" value="1"></div>
       </div>
       <div class="row" style="margin-top:10px"><button id="createBtn">إنشاء</button></div>
       <div id="created"></div>
@@ -122,10 +123,11 @@ function render(list) {
       '<div class="muted">' + (l.plan === 'life' ? 'مدى الحياة' : 'سنوي') + ' · <span class="pill ' + cls + '">' + label + '</span>' +
       (l.shopName ? ' · ' + esc(l.shopName) : '') + (l.note ? ' · ' + esc(l.note) : '') + '</div>' +
       '<div class="muted">' + (l.activatedAt ? 'تفعيل: ' + date(l.activatedAt) : '') + (l.expiresAt ? ' · ينتهي: ' + date(l.expiresAt) : '') +
-      (l.deviceId ? ' · مربوط بجهاز' : '') + '</div></div>' +
+      ' · أجهزة: <b>' + (l.devices || 0) + '/' + (l.maxDevices || 1) + '</b></div></div>' +
       '<div class="actions">' +
       '<button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button>' +
-      (l.deviceId && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لجهاز جديد</button>' : '') +
+      (l.status !== 'revoked' ? '<button class="secondary" data-devices="' + esc(l.key) + '" data-max="' + (l.maxDevices || 1) + '">عدد الأجهزة</button>' : '') +
+      (l.devices && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لأجهزة جديدة</button>' : '') +
       (l.status !== 'revoked' ? '<button class="danger" data-revoke="' + esc(l.key) + '">إلغاء</button>' : '') +
       '</div></div>';
   }).join('') || '<p class="muted">لا يوجد مفاتيح بعد.</p>';
@@ -159,7 +161,7 @@ $('copyEnv').onclick = async () => {
 $('createBtn').onclick = async () => {
   const btn = $('createBtn'); btn.disabled = true;
   try {
-    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ plan: $('plan').value, note: $('note').value, count: Number($('count').value) || 1 }) });
+    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ plan: $('plan').value, note: $('note').value, count: Number($('count').value) || 1, maxDevices: Number($('maxDevices').value) || 1 }) });
     $('created').innerHTML = '<p class="muted" style="margin-top:12px">المفاتيح الجديدة (انسخ وابعت للزبون):</p>' +
       licenses.map((l) => '<div class="lic"><span class="mono"><b>' + esc(l.key) + '</b></span><button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button></div>').join('');
     show('تم إنشاء ' + licenses.length + ' مفتاح');
@@ -173,8 +175,15 @@ document.addEventListener('click', async (e) => {
     try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.revoke) + '/revoke', { method: 'POST' }); show('تم الإلغاء'); load(); }
     catch (err) { show(errMsg(err), false); }
   }
-  if (t.dataset.reset && confirm('السماح بتفعيل ' + t.dataset.reset + ' على جهاز جديد؟ (مدة الاشتراك لا تتغير)')) {
-    try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.reset) + '/reset-device', { method: 'POST' }); show('يمكن الآن تفعيل المفتاح على الجهاز الجديد'); load(); }
+  if (t.dataset.devices) {
+    const n = prompt('كم جهاز مسموح للمفتاح ' + t.dataset.devices + '؟ (1 - 20)', t.dataset.max);
+    if (n !== null) {
+      try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.devices) + '/devices', { method: 'POST', body: JSON.stringify({ maxDevices: Number(n) || 1 }) }); show('تم تغيير عدد الأجهزة'); load(); }
+      catch (err) { show(errMsg(err), false); }
+    }
+  }
+  if (t.dataset.reset && confirm('فك ارتباط ' + t.dataset.reset + ' بكل الأجهزة الحالية حتى ينفعّل على أجهزة جديدة؟ (مدة الاشتراك لا تتغير)')) {
+    try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.reset) + '/reset-device', { method: 'POST' }); show('يمكن الآن تفعيل المفتاح على الأجهزة الجديدة'); load(); }
     catch (err) { show(errMsg(err), false); }
   }
 });
