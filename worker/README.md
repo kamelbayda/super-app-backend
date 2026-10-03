@@ -33,7 +33,8 @@ It has the same API as the Express version in `../licensing`, so the POS app and
 - **إنشاء مفتاح:** سنوي أو مدى الحياة لزبون.
 - **نسخ المفتاح** وبعته للزبون.
 - **إلغاء مفتاح:** البرنامج عند الزبون بيوقف عند أول اتصال بالإنترنت.
-- **نقل لجهاز جديد:** إذا الزبون غيّر الكمبيوتر. مدة الاشتراك ما بتتغيّر.
+- **عدد الأجهزة:** المفتاح الواحد بيشتغل على عدة أجهزة لنفس المحل (مثلاً كاشير + تابلت المدير). بتحدد العدد وقت تعمل المفتاح، أو بتغيّره بعدين من زر **عدد الأجهزة**.
+- **نقل لأجهزة جديدة:** إذا الزبون غيّر الكمبيوتر. بيفك المفتاح عن كل أجهزته، ومدة الاشتراك ما بتتغيّر.
 
 ## Endpoints
 
@@ -42,7 +43,7 @@ It has the same API as the Express version in `../licensing`, so the POS app and
 | `POST /api/licenses/activate` `{ key, deviceId, shopName }` | public (rate limited) |
 | `POST /api/licenses/refresh` `{ key, deviceId }` | public (rate limited) |
 | `GET /api/licenses/public-key` | public, gives the value for `VITE_LICENSE_PUBLIC_KEY` |
-| `GET/POST /api/admin/licenses`, `POST /api/admin/licenses/:key/revoke`, `POST /api/admin/licenses/:key/reset-device` | `x-admin-key` |
+| `GET/POST /api/admin/licenses` (`{ plan, note?, count?, maxDevices? }`), `POST /api/admin/licenses/:key/revoke`, `POST /api/admin/licenses/:key/reset-device`, `POST /api/admin/licenses/:key/devices` `{ maxDevices }` | `x-admin-key` |
 | `GET /admin` | admin page (asks for the key) |
 
 The ECDSA P-256 signing key pair is created on first use and kept in D1. Licences are

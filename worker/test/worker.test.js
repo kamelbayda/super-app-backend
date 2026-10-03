@@ -128,6 +128,37 @@ test('licence API on Workers', async (t) => {
     assert.equal(body.licenses.length, 2);
   });
 
+  await t.test('a key can allow several devices of the same shop', async () => {
+    const key = (await post('/api/admin/licenses', { plan: 'year', maxDevices: 2, note: 'multi' }, admin)).body.licenses[0].key;
+    const a = await post('/api/licenses/activate', { key, deviceId: 'shop-pc' });
+    const b = await post('/api/licenses/activate', { key, deviceId: 'tablet' });
+    assert.equal(a.status, 200);
+    assert.equal(b.status, 200);
+    assert.equal(verify(b.body.token).deviceId, 'tablet', 'token is for the requesting device');
+    assert.equal(verify(a.body.token).expiresAt, verify(b.body.token).expiresAt, 'second device does not extend the year');
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'third' })).body.error, 'device_mismatch');
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'tablet' })).status, 200);
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'third' })).status, 409);
+    const listed = (await (await fetch(`${BASE}/api/admin/licenses?q=multi`, { headers: admin })).json()).licenses[0];
+    assert.equal(listed.devices, 2);
+    assert.equal(listed.maxDevices, 2);
+    // raise the limit, then the third computer fits
+    const raised = await post(`/api/admin/licenses/${key}/devices`, { maxDevices: 3 }, admin);
+    assert.equal(raised.body.license.maxDevices, 3);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'third' })).status, 200);
+    // reset frees every device
+    assert.equal((await post(`/api/admin/licenses/${key}/reset-device`, {}, admin)).body.license.devices, 0);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'new-pc' })).status, 200);
+  });
+
+  await t.test('keys bound before multi-device support keep their device', async () => {
+    const key = 'POS-LEGAC-YKEY2-34567';
+    sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);
+    sql(`INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at) SELECT key, device_id, 1 FROM licenses WHERE key = '${key}'`);
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'old-pc' })).status, 200);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'other' })).body.error, 'device_mismatch');
+  });
+
   await t.test('admin page is served', async () => {
     const html = await (await fetch(`${BASE}/admin`)).text();
     assert.match(html, /إدارة تراخيص/);

@@ -11,6 +11,9 @@
  *
  * The ECDSA P-256 signing key pair is generated on first use and stored in D1,
  * so no key needs to be created or pasted by hand.
+ *
+ * A key may be used on several computers of the same shop (max_devices, default 1).
+ * The devices are kept in license_devices; licenses.device_id remains the first one.
  */
 import { ADMIN_PAGE } from './admin-page.js';
 
@@ -51,11 +54,32 @@ function prepare(env) {
           last_seen_at INTEGER
         )`),
         env.DB.prepare(`CREATE TABLE IF NOT EXISTS config (k TEXT PRIMARY KEY, v TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS license_devices (
+          key TEXT NOT NULL,
+          device_id TEXT NOT NULL,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER,
+          PRIMARY KEY (key, device_id)
+        )`),
       ]);
+      await migrate(env);
       return loadSigningKey(env);
     })().catch((err) => { ready = null; throw err; });
   }
   return ready;
+}
+
+// Adds max_devices to databases created before multi-device keys and copies the bound devices
+async function migrate(env) {
+  const { results } = await env.DB.prepare(`PRAGMA table_info(licenses)`).all();
+  if (!results.some((c) => c.name === 'max_devices')) {
+    await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN max_devices INTEGER NOT NULL DEFAULT 1`).run()
+      .catch(() => {}); // another isolate may have added it first
+  }
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
+     SELECT key, device_id, COALESCE(activated_at, created_at), last_seen_at FROM licenses WHERE device_id IS NOT NULL`
+  ).run();
 }
 
 async function loadSigningKey(env) {
@@ -94,10 +118,12 @@ function generateLicenseKey() {
   }
   return `POS-${groups.join('-')}`;
 }
+const clampDevices = (n) => Math.min(Math.max(parseInt(n || 1, 10) || 1, 1), 20);
 const normalizeKey = (k) => String(k || '').trim().toUpperCase();
 const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
 const toPublic = (r) => ({
   key: r.key, plan: r.plan, status: r.status, note: r.note, deviceId: r.device_id, shopName: r.shop_name,
+  maxDevices: r.max_devices ?? 1, devices: r.device_count ?? (r.device_id ? 1 : 0),
   createdAt: iso(r.created_at), activatedAt: iso(r.activated_at), expiresAt: iso(r.expires_at), lastSeenAt: iso(r.last_seen_at),
 });
 
@@ -130,34 +156,42 @@ async function checkLicense(request, env, { bind }) {
   if (!key || !deviceId || deviceId.length > 100) return fail(400, 'bad_request');
 
   const { privateKey } = await prepare(env);
-  const get = () => env.DB.prepare('SELECT * FROM licenses WHERE key = ?').bind(key).first();
+  const get = () => env.DB.prepare(`SELECT *, (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count
+    FROM licenses WHERE key = ?`).bind(key).first();
   let row = await get();
   if (!row) return fail(404, 'invalid_key');
   if (row.status === 'revoked') return fail(403, 'revoked');
   const now = Date.now();
 
-  if (!row.device_id) {
-    if (!bind) return fail(404, 'invalid_key');
-    // Bind to this device. The subscription clock starts on the very first activation only,
-    // so moving a key to a new computer (reset-device) does not extend it.
+  const known = await env.DB.prepare('SELECT 1 FROM license_devices WHERE key = ? AND device_id = ?').bind(key, deviceId).first();
+  if (!known) {
+    if (!bind) return fail(row.device_count ? 409 : 404, row.device_count ? 'device_mismatch' : 'invalid_key');
+    // Add this computer if the key still has a free device slot (checked in the same statement)
+    const added = await env.DB.prepare(
+      `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
+       SELECT ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM license_devices WHERE key = ?) < ?`
+    ).bind(key, deviceId, now, now, key, row.max_devices ?? 1).run();
+    if (!added.meta?.changes) return fail(409, 'device_mismatch');
+    // The subscription clock starts on the very first activation only, so adding or moving
+    // computers (reset-device) does not extend it.
     const expires = row.plan === 'year' ? now + YEAR_MS : null;
     await env.DB.prepare(
-      `UPDATE licenses SET device_id = ?, shop_name = COALESCE(?, shop_name), last_seen_at = ?,
+      `UPDATE licenses SET device_id = COALESCE(device_id, ?), shop_name = COALESCE(?, shop_name), last_seen_at = ?,
          expires_at = CASE WHEN activated_at IS NULL THEN ? ELSE expires_at END,
          activated_at = COALESCE(activated_at, ?)
-       WHERE key = ? AND device_id IS NULL`
+       WHERE key = ?`
     ).bind(deviceId, shopName, now, expires, now, key).run();
-    row = await get();
   } else {
-    await env.DB.prepare(`UPDATE licenses SET last_seen_at = ?, shop_name = COALESCE(?, shop_name) WHERE key = ?`)
-      .bind(now, shopName, key).run();
-    row = await get();
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE licenses SET last_seen_at = ?, shop_name = COALESCE(?, shop_name) WHERE key = ?`).bind(now, shopName, key),
+      env.DB.prepare(`UPDATE license_devices SET last_seen_at = ? WHERE key = ? AND device_id = ?`).bind(now, key, deviceId),
+    ]);
   }
-  if (row.device_id !== deviceId) return fail(409, 'device_mismatch');
+  row = await get();
   if (row.expires_at && row.expires_at < now) return fail(410, 'expired');
 
   const token = await signLicense(
-    { v: 1, key: row.key, deviceId: row.device_id, shop: row.shop_name, plan: row.plan, issuedAt: now, expiresAt: row.expires_at ?? null },
+    { v: 1, key: row.key, deviceId, shop: row.shop_name, plan: row.plan, issuedAt: now, expiresAt: row.expires_at ?? null },
     privateKey
   );
   return json({ ok: true, token, license: toPublic(row) });
@@ -177,10 +211,11 @@ async function admin(request, env, path) {
     if (body.plan !== 'year' && body.plan !== 'life') return fail(400, 'bad_plan');
     const count = Math.min(Math.max(parseInt(body.count || 1, 10) || 1, 1), 100);
     const note = body.note ? String(body.note).slice(0, 500) : null;
+    const maxDevices = clampDevices(body.maxDevices);
     const created = [];
     for (let i = 0; i < count; i++) {
-      const row = await env.DB.prepare(`INSERT OR IGNORE INTO licenses (key, plan, note, created_at) VALUES (?, ?, ?, ?) RETURNING *`)
-        .bind(generateLicenseKey(), body.plan, note, Date.now()).first();
+      const row = await env.DB.prepare(`INSERT OR IGNORE INTO licenses (key, plan, note, created_at, max_devices) VALUES (?, ?, ?, ?, ?) RETURNING *`)
+        .bind(generateLicenseKey(), body.plan, note, Date.now(), maxDevices).first();
       if (row) created.push(toPublic(row));
     }
     return json({ ok: true, licenses: created }, 201);
@@ -192,18 +227,28 @@ async function admin(request, env, path) {
     const q = url.searchParams.get('q');
     if (q) { where.push('(key LIKE ? OR shop_name LIKE ? OR note LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     const { results } = await env.DB.prepare(
-      `SELECT * FROM licenses ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 500`
+      `SELECT *, (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count
+       FROM licenses ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 500`
     ).bind(...params).all();
     return json({ ok: true, licenses: results.map(toPublic) });
   }
 
-  const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device)$/);
+  const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices)$/);
   if (m && request.method === 'POST') {
     const key = normalizeKey(decodeURIComponent(m[1]));
-    const sql = m[2] === 'revoke'
-      ? `UPDATE licenses SET status = 'revoked' WHERE key = ? RETURNING *`
-      : `UPDATE licenses SET device_id = NULL WHERE key = ? RETURNING *`;
-    const row = await env.DB.prepare(sql).bind(key).first();
+    let row;
+    if (m[2] === 'revoke') {
+      row = await env.DB.prepare(`UPDATE licenses SET status = 'revoked' WHERE key = ? RETURNING *`).bind(key).first();
+    } else if (m[2] === 'reset-device') {
+      // Frees every computer of this key; the expiry date does not change
+      row = await env.DB.prepare(`UPDATE licenses SET device_id = NULL WHERE key = ? RETURNING *`).bind(key).first();
+      if (row) await env.DB.prepare(`DELETE FROM license_devices WHERE key = ?`).bind(key).run();
+      if (row) row.device_count = 0;
+    } else {
+      const body = await request.json().catch(() => ({}));
+      row = await env.DB.prepare(`UPDATE licenses SET max_devices = ? WHERE key = ? RETURNING *,
+        (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count`).bind(clampDevices(body.maxDevices), key).first();
+    }
     if (!row) return fail(404, 'invalid_key');
     return json({ ok: true, license: toPublic(row) });
   }
