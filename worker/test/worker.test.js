@@ -159,6 +159,35 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post('/api/licenses/activate', { key, deviceId: 'other' })).body.error, 'device_mismatch');
   });
 
+  await t.test('keys carry the customer email: set, searched, edited, filled on activation', async () => {
+    const bad = await post('/api/admin/licenses', { plan: 'year', email: 'not-an-email' }, admin);
+    assert.equal(bad.status, 400);
+    assert.equal(bad.body.error, 'bad_email');
+
+    const made = await post('/api/admin/licenses', { plan: 'year', email: ' Owner@Shop.COM ' }, admin);
+    assert.equal(made.status, 201);
+    const key = made.body.licenses[0].key;
+    assert.equal(made.body.licenses[0].email, 'owner@shop.com');
+
+    const found = await (await fetch(`${BASE}/api/admin/licenses?q=OWNER@shop`, { headers: admin })).json();
+    assert.deepEqual(found.licenses.map((l) => l.key), [key]);
+
+    const edited = await post(`/api/admin/licenses/${key}/email`, { email: 'new@shop.com' }, admin);
+    assert.equal(edited.body.license.email, 'new@shop.com');
+    // The owner email sent on activation never overwrites one the admin set
+    await post('/api/licenses/activate', { key, deviceId: 'mail-pc', email: 'other@shop.com' });
+    const after = await (await fetch(`${BASE}/api/admin/licenses?q=${key}`, { headers: admin })).json();
+    assert.equal(after.licenses[0].email, 'new@shop.com');
+
+    const cleared = await post(`/api/admin/licenses/${key}/email`, { email: '' }, admin);
+    assert.equal(cleared.body.license.email, null);
+
+    // A key created without an email gets the owner's email on its first activation
+    const plain = (await post('/api/admin/licenses', { plan: 'life' }, admin)).body.licenses[0].key;
+    const act = await post('/api/licenses/activate', { key: plain, deviceId: 'mail-pc-2', email: 'Shop@Owner.com' });
+    assert.equal(act.body.license.email, 'shop@owner.com');
+  });
+
   await t.test('admin page is served', async () => {
     const html = await (await fetch(`${BASE}/admin`)).text();
     assert.match(html, /إدارة تراخيص/);

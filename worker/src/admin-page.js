@@ -39,6 +39,7 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
   .note { padding:10px 12px; border-radius:8px; margin-bottom:12px; }
   .note.ok { background:#1D9E7522; } .note.err { background:#d92d2022; }
   .hidden { display:none; }
+  .email { font-weight:700; font-size:15px; text-align:right; unicode-bidi:plaintext; }
 </style>
 </head>
 <body>
@@ -68,6 +69,7 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
     <section class="card">
       <h2>إنشاء مفتاح لزبون</h2>
       <div class="row">
+        <div><label for="email">إيميل الزبون</label><input id="email" type="email" dir="ltr" placeholder="name@email.com" autocapitalize="none"></div>
         <div><label for="note">اسم المحل / ملاحظة</label><input id="note" placeholder="مثلاً: سوبرماركت البركة"></div>
         <div style="flex:0 1 140px"><label for="plan">النوع</label>
           <select id="plan"><option value="year">سنوي</option><option value="life">مدى الحياة</option></select></div>
@@ -80,7 +82,7 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
 
     <section class="card">
       <div class="row" style="align-items:end">
-        <div><label for="q">بحث (مفتاح، محل، ملاحظة)</label><input id="q" type="search"></div>
+        <div><label for="q">بحث (إيميل، مفتاح، محل، ملاحظة)</label><input id="q" type="search"></div>
         <button class="secondary" id="refreshBtn" style="flex:0 0 auto">تحديث</button>
       </div>
       <p class="muted" id="count-label"></p>
@@ -104,7 +106,7 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح' };
+const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح' };
 const errMsg = (e) => ERR[e.message] || ('خطأ: ' + e.message);
 const date = (s) => s ? new Date(s).toLocaleDateString('ar-LB') : '—';
 
@@ -120,6 +122,7 @@ function render(list) {
   $('list').innerHTML = list.map((l) => {
     const [cls, label] = statusOf(l);
     return '<div class="lic"><div>' +
+      (l.email ? '<div class="email" dir="ltr">📧 ' + esc(l.email) + '</div>' : '<div class="muted">📧 بلا إيميل</div>') +
       '<div class="mono"><b>' + esc(l.key) + '</b></div>' +
       '<div class="muted">' + (l.plan === 'life' ? 'مدى الحياة' : 'سنوي') + ' · <span class="pill ' + cls + '">' + label + '</span>' +
       (l.shopName ? ' · ' + esc(l.shopName) : '') + (l.note ? ' · ' + esc(l.note) : '') + '</div>' +
@@ -127,6 +130,7 @@ function render(list) {
       ' · أجهزة: <b>' + (l.devices || 0) + '/' + (l.maxDevices || 1) + '</b></div></div>' +
       '<div class="actions">' +
       '<button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button>' +
+      '<button class="secondary" data-email="' + esc(l.key) + '" data-current="' + esc(l.email || '') + '">' + (l.email ? 'تعديل الإيميل' : 'إضافة إيميل') + '</button>' +
       (l.status !== 'revoked' ? '<button class="secondary" data-devices="' + esc(l.key) + '" data-max="' + (l.maxDevices || 1) + '">عدد الأجهزة</button>' : '') +
       (l.devices && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لأجهزة جديدة</button>' : '') +
       (l.status !== 'revoked' ? '<button class="danger" data-revoke="' + esc(l.key) + '">إلغاء</button>' : '') +
@@ -162,10 +166,11 @@ $('copyEnv').onclick = async () => {
 $('createBtn').onclick = async () => {
   const btn = $('createBtn'); btn.disabled = true;
   try {
-    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ plan: $('plan').value, note: $('note').value, count: Number($('count').value) || 1, maxDevices: Number($('maxDevices').value) || 1 }) });
+    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ plan: $('plan').value, email: $('email').value, note: $('note').value, count: Number($('count').value) || 1, maxDevices: Number($('maxDevices').value) || 1 }) });
     $('created').innerHTML = '<p class="muted" style="margin-top:12px">المفاتيح الجديدة (انسخ وابعت للزبون):</p>' +
-      licenses.map((l) => '<div class="lic"><span class="mono"><b>' + esc(l.key) + '</b></span><button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button></div>').join('');
+      licenses.map((l) => '<div class="lic"><span><span class="mono"><b>' + esc(l.key) + '</b></span>' + (l.email ? ' <span class="muted" dir="ltr">' + esc(l.email) + '</span>' : '') + '</span><button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button></div>').join('');
     show('تم إنشاء ' + licenses.length + ' مفتاح');
+    $('email').value = ''; $('note').value = '';
     load();
   } catch (e) { show(errMsg(e), false); } finally { btn.disabled = false; }
 };
@@ -180,6 +185,13 @@ document.addEventListener('click', async (e) => {
     const n = prompt('كم جهاز مسموح للمفتاح ' + t.dataset.devices + '؟ (1 - 20)', t.dataset.max);
     if (n !== null) {
       try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.devices) + '/devices', { method: 'POST', body: JSON.stringify({ maxDevices: Number(n) || 1 }) }); show('تم تغيير عدد الأجهزة'); load(); }
+      catch (err) { show(errMsg(err), false); }
+    }
+  }
+  if (t.dataset.email) {
+    const v = prompt('إيميل الزبون للمفتاح ' + t.dataset.email + ' (فاضي لمسحه):', t.dataset.current || '');
+    if (v !== null) {
+      try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.email) + '/email', { method: 'POST', body: JSON.stringify({ email: v }) }); show('تم حفظ الإيميل'); load(); }
       catch (err) { show(errMsg(err), false); }
     }
   }
