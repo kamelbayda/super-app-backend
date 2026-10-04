@@ -3,7 +3,7 @@
  *
  * Same API as the Express version (../licensing), so the POS app and
  * scripts/licenses.js work unchanged:
- *   POST /api/licenses/activate   { key, deviceId, shopName }
+ *   POST /api/licenses/activate   { key, deviceId, shopName, email? }
  *   POST /api/licenses/refresh    { key, deviceId }
  *   GET  /api/licenses/public-key -> base64 SPKI for VITE_LICENSE_PUBLIC_KEY
  *   /api/admin/licenses...        (header x-admin-key = ADMIN_API_KEY secret)
@@ -11,6 +11,9 @@
  *
  * The ECDSA P-256 signing key pair is generated on first use and stored in D1,
  * so no key needs to be created or pasted by hand.
+ *
+ * Each key may carry the customer's email (set by the admin, or the shop owner's email
+ * sent on the first activation) so keys are easy to recognise and search.
  *
  * A key may be used on several computers of the same shop (max_devices, default 1).
  * The devices are kept in license_devices; licenses.device_id remains the first one.
@@ -69,12 +72,15 @@ function prepare(env) {
   return ready;
 }
 
-// Adds max_devices to databases created before multi-device keys and copies the bound devices
+// Adds columns to databases created by older versions and copies the bound devices
 async function migrate(env) {
   const { results } = await env.DB.prepare(`PRAGMA table_info(licenses)`).all();
   if (!results.some((c) => c.name === 'max_devices')) {
     await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN max_devices INTEGER NOT NULL DEFAULT 1`).run()
       .catch(() => {}); // another isolate may have added it first
+  }
+  if (!results.some((c) => c.name === 'email')) {
+    await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN email TEXT`).run().catch(() => {});
   }
   await env.DB.prepare(
     `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
@@ -120,9 +126,16 @@ function generateLicenseKey() {
 }
 const clampDevices = (n) => Math.min(Math.max(parseInt(n || 1, 10) || 1, 1), 20);
 const normalizeKey = (k) => String(k || '').trim().toUpperCase();
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Lowercased email, '' when empty, or null when it is not a valid address. */
+function cleanEmail(value) {
+  const e = String(value || '').trim().toLowerCase();
+  if (!e) return '';
+  return e.length <= 200 && EMAIL_RE.test(e) ? e : null;
+}
 const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
 const toPublic = (r) => ({
-  key: r.key, plan: r.plan, status: r.status, note: r.note, deviceId: r.device_id, shopName: r.shop_name,
+  key: r.key, plan: r.plan, status: r.status, note: r.note, email: r.email ?? null, deviceId: r.device_id, shopName: r.shop_name,
   maxDevices: r.max_devices ?? 1, devices: r.device_count ?? (r.device_id ? 1 : 0),
   createdAt: iso(r.created_at), activatedAt: iso(r.activated_at), expiresAt: iso(r.expires_at), lastSeenAt: iso(r.last_seen_at),
 });
@@ -153,6 +166,7 @@ async function checkLicense(request, env, { bind }) {
   const key = normalizeKey(body.key);
   const deviceId = String(body.deviceId || '').trim();
   const shopName = String(body.shopName || '').trim().slice(0, 200) || null;
+  const ownerEmail = cleanEmail(body.email) || null;
   if (!key || !deviceId || deviceId.length > 100) return fail(400, 'bad_request');
 
   const { privateKey } = await prepare(env);
@@ -176,11 +190,11 @@ async function checkLicense(request, env, { bind }) {
     // computers (reset-device) does not extend it.
     const expires = row.plan === 'year' ? now + YEAR_MS : null;
     await env.DB.prepare(
-      `UPDATE licenses SET device_id = COALESCE(device_id, ?), shop_name = COALESCE(?, shop_name), last_seen_at = ?,
+      `UPDATE licenses SET device_id = COALESCE(device_id, ?), shop_name = COALESCE(?, shop_name), email = COALESCE(email, ?), last_seen_at = ?,
          expires_at = CASE WHEN activated_at IS NULL THEN ? ELSE expires_at END,
          activated_at = COALESCE(activated_at, ?)
        WHERE key = ?`
-    ).bind(deviceId, shopName, now, expires, now, key).run();
+    ).bind(deviceId, shopName, ownerEmail, now, expires, now, key).run();
   } else {
     await env.DB.batch([
       env.DB.prepare(`UPDATE licenses SET last_seen_at = ?, shop_name = COALESCE(?, shop_name) WHERE key = ?`).bind(now, shopName, key),
@@ -211,11 +225,13 @@ async function admin(request, env, path) {
     if (body.plan !== 'year' && body.plan !== 'life') return fail(400, 'bad_plan');
     const count = Math.min(Math.max(parseInt(body.count || 1, 10) || 1, 1), 100);
     const note = body.note ? String(body.note).slice(0, 500) : null;
+    const email = cleanEmail(body.email);
+    if (email === null) return fail(400, 'bad_email');
     const maxDevices = clampDevices(body.maxDevices);
     const created = [];
     for (let i = 0; i < count; i++) {
-      const row = await env.DB.prepare(`INSERT OR IGNORE INTO licenses (key, plan, note, created_at, max_devices) VALUES (?, ?, ?, ?, ?) RETURNING *`)
-        .bind(generateLicenseKey(), body.plan, note, Date.now(), maxDevices).first();
+      const row = await env.DB.prepare(`INSERT OR IGNORE INTO licenses (key, plan, note, email, created_at, max_devices) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`)
+        .bind(generateLicenseKey(), body.plan, note, email || null, Date.now(), maxDevices).first();
       if (row) created.push(toPublic(row));
     }
     return json({ ok: true, licenses: created }, 201);
@@ -225,7 +241,10 @@ async function admin(request, env, path) {
     const where = [], params = [];
     if (url.searchParams.get('status')) { where.push('status = ?'); params.push(url.searchParams.get('status')); }
     const q = url.searchParams.get('q');
-    if (q) { where.push('(key LIKE ? OR shop_name LIKE ? OR note LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    if (q) {
+      where.push('(key LIKE ? OR shop_name LIKE ? OR note LIKE ? OR email LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q.toLowerCase()}%`);
+    }
     const { results } = await env.DB.prepare(
       `SELECT *, (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count
        FROM licenses ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 500`
@@ -233,7 +252,7 @@ async function admin(request, env, path) {
     return json({ ok: true, licenses: results.map(toPublic) });
   }
 
-  const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices)$/);
+  const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices|email)$/);
   if (m && request.method === 'POST') {
     const key = normalizeKey(decodeURIComponent(m[1]));
     let row;
@@ -244,6 +263,11 @@ async function admin(request, env, path) {
       row = await env.DB.prepare(`UPDATE licenses SET device_id = NULL WHERE key = ? RETURNING *`).bind(key).first();
       if (row) await env.DB.prepare(`DELETE FROM license_devices WHERE key = ?`).bind(key).run();
       if (row) row.device_count = 0;
+    } else if (m[2] === 'email') {
+      const email = cleanEmail((await request.json().catch(() => ({}))).email);
+      if (email === null) return fail(400, 'bad_email');
+      row = await env.DB.prepare(`UPDATE licenses SET email = ? WHERE key = ? RETURNING *,
+        (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count`).bind(email || null, key).first();
     } else {
       const body = await request.json().catch(() => ({}));
       row = await env.DB.prepare(`UPDATE licenses SET max_devices = ? WHERE key = ? RETURNING *,
