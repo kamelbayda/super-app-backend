@@ -24,6 +24,10 @@
  *
  * A key may be used on several computers of the same shop (max_devices, default 1).
  * The devices are kept in license_devices; licenses.device_id remains the first one.
+ *
+ * A key belongs to ONE shop: the app sends its shop id (shared by the shop's computers through
+ * cloud sync, different for every shop, even several shops on one browser). The first shop
+ * that uses the key owns it; another shop gets 'other_shop'. reset-device frees it.
  */
 import { ADMIN_PAGE } from './admin-page.js';
 
@@ -120,6 +124,9 @@ async function migrate(env) {
   }
   if (!results.some((c) => c.name === 'business_type')) {
     await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN business_type TEXT`).run().catch(() => {});
+  }
+  if (!results.some((c) => c.name === 'shop_uid')) {
+    await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN shop_uid TEXT`).run().catch(() => {});
   }
   await env.DB.prepare(
     `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
@@ -219,6 +226,7 @@ async function checkLicense(request, env, { bind }) {
   const deviceId = String(body.deviceId || '').trim();
   const shopName = String(body.shopName || '').trim().slice(0, 200) || null;
   const ownerEmail = cleanEmail(body.email) || null;
+  const shopUid = String(body.shopUid || '').trim().slice(0, 100) || null;
   if (!key || !deviceId || deviceId.length > 100) return fail(400, 'bad_request');
 
   const { privateKey } = await prepare(env);
@@ -227,6 +235,8 @@ async function checkLicense(request, env, { bind }) {
   let row = await get();
   if (!row) return fail(404, 'invalid_key');
   if (row.status === 'revoked') return fail(403, 'revoked');
+  // One key, one shop
+  if (row.shop_uid && shopUid && row.shop_uid !== shopUid) return fail(409, 'other_shop');
   const now = Date.now();
 
   const known = await env.DB.prepare('SELECT 1 FROM license_devices WHERE key = ? AND device_id = ?').bind(key, deviceId).first();
@@ -254,7 +264,12 @@ async function checkLicense(request, env, { bind }) {
       env.DB.prepare(`UPDATE license_devices SET last_seen_at = ? WHERE key = ? AND device_id = ?`).bind(now, key, deviceId),
     ]);
   }
+  // The first shop to use the key owns it (also claims keys activated before shops were tracked)
+  if (shopUid && !row.shop_uid) {
+    await env.DB.prepare(`UPDATE licenses SET shop_uid = ? WHERE key = ? AND shop_uid IS NULL`).bind(shopUid, key).run();
+  }
   row = await get();
+  if (row.shop_uid && shopUid && row.shop_uid !== shopUid) return fail(409, 'other_shop');
   if (row.expires_at && row.expires_at < now) return fail(410, 'expired');
 
   const token = await signLicense(
@@ -409,7 +424,7 @@ async function admin(request, env, path) {
       row = await env.DB.prepare(`UPDATE licenses SET status = 'revoked' WHERE key = ? RETURNING *`).bind(key).first();
     } else if (m[2] === 'reset-device') {
       // Frees every computer of this key; the expiry date does not change
-      row = await env.DB.prepare(`UPDATE licenses SET device_id = NULL WHERE key = ? RETURNING *`).bind(key).first();
+      row = await env.DB.prepare(`UPDATE licenses SET device_id = NULL, shop_uid = NULL WHERE key = ? RETURNING *`).bind(key).first();
       if (row) await env.DB.prepare(`DELETE FROM license_devices WHERE key = ?`).bind(key).run();
       if (row) row.device_count = 0;
     } else if (m[2] === 'email') {

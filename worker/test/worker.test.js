@@ -151,6 +151,32 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post('/api/licenses/activate', { key, deviceId: 'new-pc' })).status, 200);
   });
 
+  const shopIp = { 'cf-connecting-ip': '10.9.9.9' };
+  await t.test('a key belongs to one shop, even with free device slots', async () => {
+    const key = (await post('/api/admin/licenses', { plan: 'year', maxDevices: 4, note: 'one-shop' }, admin)).body.licenses[0].key;
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'pc-a', shopUid: 'shop-A' }, shopIp)).status, 200);
+    // a second computer of the same shop is fine
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'pc-a2', shopUid: 'shop-A' }, shopIp)).status, 200);
+    // another shop (e.g. a second shop on the same browser) is refused
+    const other = await post('/api/licenses/activate', { key, deviceId: 'pc-b', shopUid: 'shop-B' }, shopIp);
+    assert.equal(other.status, 409);
+    assert.equal(other.body.error, 'other_shop');
+    // and so is a refresh from another shop
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'pc-a2', shopUid: 'shop-B' }, shopIp)).body.error, 'other_shop');
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'pc-a2', shopUid: 'shop-A' }, shopIp)).status, 200);
+    // moving the key frees the shop too
+    await post(`/api/admin/licenses/${key}/reset-device`, {}, admin);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'pc-b', shopUid: 'shop-B' }, shopIp)).status, 200);
+  });
+
+  await t.test('keys activated before shops were tracked are claimed by the first shop that checks in', async () => {
+    const key = (await post('/api/admin/licenses', { plan: 'year', maxDevices: 2, note: 'legacy-shop' }, admin)).body.licenses[0].key;
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'old-1' }, shopIp)).status, 200);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'old-2' }, shopIp)).status, 200);
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'old-1', shopUid: 'first' }, shopIp)).status, 200);
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'old-2', shopUid: 'second' }, shopIp)).body.error, 'other_shop');
+  });
+
   await t.test('keys bound before multi-device support keep their device', async () => {
     const key = 'POS-LEGAC-YKEY2-34567';
     sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);
