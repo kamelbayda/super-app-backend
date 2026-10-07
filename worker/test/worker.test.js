@@ -188,6 +188,60 @@ test('licence API on Workers', async (t) => {
     assert.equal(act.body.license.email, 'shop@owner.com');
   });
 
+  await t.test('subscriptions: plans, request, approve, auto key, monthly expiry and business type', async () => {
+    const savedPlans = await post('/api/admin/plans', { prices: { phones: { month: 15, year: 120 } }, paymentInfo: 'Whish 03 000 000' }, admin);
+    assert.equal(savedPlans.body.plans.prices.phones.month, 15);
+    const pub = await (await fetch(`${BASE}/api/plans`)).json();
+    assert.deepEqual(pub.businessTypes, ['supermarket', 'phones']);
+    assert.equal(pub.plans.prices.phones.year, 120);
+    assert.equal(pub.plans.paymentInfo, 'Whish 03 000 000');
+    assert.equal((await post('/api/admin/plans', {}, {})).status, 401);
+
+    assert.equal((await post('/api/requests', { businessType: 'cars', period: 'month', email: 'a@b.co', phone: '1' })).status, 400);
+    assert.equal((await post('/api/requests', { businessType: 'phones', period: 'month', email: 'bad', phone: '1' })).body.error, 'bad_email');
+    const made = await post('/api/requests', { businessType: 'phones', period: 'month', shopName: 'Phone City', ownerName: 'Ali', email: 'Ali@Phone.City', phone: '70 123 456' });
+    assert.equal(made.status, 201);
+    const { id, secret } = made.body;
+    const status = async (sec = secret) => (await (await fetch(`${BASE}/api/requests/${id}?secret=${sec}`)).json());
+    assert.equal((await status()).status, 'pending');
+    assert.equal((await status()).licenseKey, null);
+    assert.equal((await status('wrong')).ok, false);
+
+    const list = await (await fetch(`${BASE}/api/admin/requests?status=pending`, { headers: admin })).json();
+    assert.ok(list.requests.some((r) => r.id === id && r.email === 'ali@phone.city' && r.businessType === 'phones'));
+
+    const approved = await post(`/api/admin/requests/${id}/approve`, { maxDevices: 2 }, admin);
+    assert.equal(approved.body.license.period, 'month');
+    assert.equal(approved.body.license.businessType, 'phones');
+    assert.equal(approved.body.license.maxDevices, 2);
+    assert.equal(approved.body.license.email, 'ali@phone.city');
+    assert.equal((await post(`/api/admin/requests/${id}/approve`, {}, admin)).status, 409);
+
+    const st = await status();
+    assert.equal(st.status, 'approved');
+    assert.equal(st.licenseKey, approved.body.license.key);
+    const act = await post('/api/licenses/activate', { key: st.licenseKey, deviceId: 'phones-pc' });
+    assert.equal(act.status, 200);
+    const payload = verify(act.body.token);
+    assert.equal(payload.businessType, 'phones');
+    assert.equal(payload.period, 'month');
+    const days = (payload.expiresAt - payload.issuedAt) / 86400000;
+    assert.ok(days > 29.9 && days < 30.1, `monthly key should last 30 days, got ${days}`);
+
+    const rej = (await post('/api/requests', { businessType: 'supermarket', period: 'life', email: 'x@y.co', phone: '1' })).body;
+    assert.equal((await post(`/api/admin/requests/${rej.id}/reject`, {}, admin)).status, 200);
+    assert.equal((await (await fetch(`${BASE}/api/requests/${rej.id}?secret=${rej.secret}`)).json()).status, 'rejected');
+  });
+
+  await t.test('admin can create monthly keys for a business type', async () => {
+    const r = await post('/api/admin/licenses', { period: 'month', businessType: 'phones' }, admin);
+    assert.equal(r.status, 201);
+    assert.equal(r.body.licenses[0].period, 'month');
+    assert.equal(r.body.licenses[0].plan, 'year');
+    assert.equal(r.body.licenses[0].businessType, 'phones');
+    assert.equal((await post('/api/admin/licenses', { period: 'week' }, admin)).status, 400);
+  });
+
   await t.test('admin page is served', async () => {
     const html = await (await fetch(`${BASE}/admin`)).text();
     assert.match(html, /إدارة تراخيص/);
