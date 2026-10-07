@@ -57,6 +57,28 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
   </section>
 
   <div id="app" class="hidden">
+    <section class="card" id="requestsCard">
+      <h2>📥 طلبات الاشتراك <span class="pill" id="pendingCount"></span></h2>
+      <p class="muted">الزبون بيختار نوع المحل والاشتراك من البرنامج وبيبعت طلب. بعد ما يدفع، كبس <b>موافقة</b> وبيتفعّل البرنامج عندو لحالو.</p>
+      <div class="row" style="margin-bottom:8px">
+        <select id="reqFilter" style="flex:0 1 200px"><option value="pending">بانتظار الموافقة</option><option value="">كل الطلبات</option><option value="approved">الموافق عليها</option><option value="rejected">المرفوضة</option></select>
+      </div>
+      <div id="requests"></div>
+    </section>
+
+    <section class="card">
+      <h2>💲 الأسعار وطريقة الدفع</h2>
+      <p class="muted">هيدي الأسعار بتطلع للزبون وقت يختار الاشتراك. خلّي الخانة فاضية إذا بدك يكتب "حسب الاتفاق".</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px">
+        <tr><th></th><th>شهري</th><th>سنوي</th><th>مدى الحياة</th></tr>
+        <tr><td>🛒 سوبرماركت</td><td><input id="p-supermarket-month" type="number" min="0"></td><td><input id="p-supermarket-year" type="number" min="0"></td><td><input id="p-supermarket-life" type="number" min="0"></td></tr>
+        <tr><td>📱 محل تلفونات</td><td><input id="p-phones-month" type="number" min="0"></td><td><input id="p-phones-year" type="number" min="0"></td><td><input id="p-phones-life" type="number" min="0"></td></tr>
+      </table>
+      <label for="paymentInfo" style="margin-top:10px">طريقة الدفع (بتطلع للزبون بعد ما يبعت الطلب)</label>
+      <textarea id="paymentInfo" rows="3" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text);font:inherit" placeholder="مثلاً: حوّل المبلغ على Whish رقم 03 123 456 أو OMT باسم ..."></textarea>
+      <div class="row" style="margin-top:10px"><button id="savePlansBtn">حفظ الأسعار</button></div>
+    </section>
+
     <section class="card">
       <h2>مفتاح التحقق العام (للبرنامج)</h2>
       <p class="muted">هذا المفتاح عام وآمن. ضعه في ملف <span class="mono">.env</span> تبع البرنامج قبل البناء باسم <span class="mono">VITE_LICENSE_PUBLIC_KEY</span>، ومع رابط هذه الصفحة (بدون /admin) باسم <span class="mono">VITE_LICENSE_SERVER_URL</span>.</p>
@@ -72,7 +94,9 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
         <div><label for="email">إيميل الزبون</label><input id="email" type="email" dir="ltr" placeholder="name@email.com" autocapitalize="none"></div>
         <div><label for="note">اسم المحل / ملاحظة</label><input id="note" placeholder="مثلاً: سوبرماركت البركة"></div>
         <div style="flex:0 1 140px"><label for="plan">النوع</label>
-          <select id="plan"><option value="year">سنوي</option><option value="life">مدى الحياة</option></select></div>
+          <select id="plan"><option value="month">شهري</option><option value="year" selected>سنوي</option><option value="life">مدى الحياة</option></select></div>
+        <div style="flex:0 1 160px"><label for="bizType">نوع المحل</label>
+          <select id="bizType"><option value="supermarket">🛒 سوبرماركت</option><option value="phones">📱 محل تلفونات</option></select></div>
         <div style="flex:0 1 110px"><label for="maxDevices">عدد الأجهزة</label><input id="maxDevices" type="number" min="1" max="20" value="1"></div>
         <div style="flex:0 1 90px"><label for="count">عدد المفاتيح</label><input id="count" type="number" min="1" max="100" value="1"></div>
       </div>
@@ -106,7 +130,9 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح' };
+const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح', already_decided: 'هالطلب انعملو قرار من قبل' };
+const PERIOD = { month: 'شهري', year: 'سنوي', life: 'مدى الحياة' };
+const BIZ = { supermarket: '🛒 سوبرماركت', phones: '📱 محل تلفونات' };
 const errMsg = (e) => ERR[e.message] || ('خطأ: ' + e.message);
 const date = (s) => s ? new Date(s).toLocaleDateString('ar-LB') : '—';
 
@@ -124,7 +150,7 @@ function render(list) {
     return '<div class="lic"><div>' +
       (l.email ? '<div class="email" dir="ltr">📧 ' + esc(l.email) + '</div>' : '<div class="muted">📧 بلا إيميل</div>') +
       '<div class="mono"><b>' + esc(l.key) + '</b></div>' +
-      '<div class="muted">' + (l.plan === 'life' ? 'مدى الحياة' : 'سنوي') + ' · <span class="pill ' + cls + '">' + label + '</span>' +
+      '<div class="muted">' + (BIZ[l.businessType] || '') + ' · ' + (PERIOD[l.period] || PERIOD[l.plan] || '') + ' · <span class="pill ' + cls + '">' + label + '</span>' +
       (l.shopName ? ' · ' + esc(l.shopName) : '') + (l.note ? ' · ' + esc(l.note) : '') + '</div>' +
       '<div class="muted">' + (l.activatedAt ? 'تفعيل: ' + date(l.activatedAt) : '') + (l.expiresAt ? ' · ينتهي: ' + date(l.expiresAt) : '') +
       ' · أجهزة: <b>' + (l.devices || 0) + '/' + (l.maxDevices || 1) + '</b></div></div>' +
@@ -144,6 +170,36 @@ async function load() {
   render(licenses);
 }
 
+function renderRequests(list) {
+  $('requests').innerHTML = list.map((r) => {
+    const st = r.status === 'pending' ? ['', 'بانتظار الموافقة'] : r.status === 'approved' ? ['active', 'موافق'] : ['revoked', 'مرفوض'];
+    return '<div class="lic"><div>' +
+      '<div class="email" dir="ltr">📧 ' + esc(r.email) + '</div>' +
+      '<div><b>' + esc(r.shopName || '—') + '</b> · ' + esc(r.ownerName || '') + ' · <span dir="ltr">' + esc(r.phone || '') + '</span></div>' +
+      '<div class="muted">' + (BIZ[r.businessType] || r.businessType) + ' · ' + (PERIOD[r.period] || r.period) + ' · <span class="pill ' + st[0] + '">' + st[1] + '</span> · ' + date(r.createdAt) + '</div>' +
+      (r.note ? '<div class="muted">📝 ' + esc(r.note) + '</div>' : '') +
+      (r.licenseKey ? '<div class="mono">' + esc(r.licenseKey) + '</div>' : '') +
+      '</div><div class="actions">' +
+      (r.status === 'pending' ? '<button data-approve="' + esc(r.id) + '">موافقة ✅</button><button class="danger" data-reject="' + esc(r.id) + '">رفض</button>' : '') +
+      (r.licenseKey ? '<button class="secondary" data-copy="' + esc(r.licenseKey) + '">نسخ المفتاح</button>' : '') +
+      '</div></div>';
+  }).join('') || '<p class="muted">ما في طلبات هون.</p>';
+}
+async function loadRequests() {
+  const f = $('reqFilter').value;
+  const { requests } = await api('/api/admin/requests' + (f ? '?status=' + f : ''));
+  renderRequests(requests);
+  const pending = (await api('/api/admin/requests?status=pending')).requests.length;
+  $('pendingCount').textContent = pending ? pending + ' جديد' : '';
+}
+async function loadPlans() {
+  const { plans } = await api('/api/admin/plans');
+  for (const t of ['supermarket', 'phones']) for (const p of ['month', 'year', 'life']) {
+    const v = plans.prices[t][p]; $('p-' + t + '-' + p).value = v == null ? '' : v;
+  }
+  $('paymentInfo').value = plans.paymentInfo || '';
+}
+
 async function enter() {
   adminKey = $('adminKey').value.trim() || adminKey;
   try {
@@ -152,8 +208,18 @@ async function enter() {
     $('login').classList.add('hidden'); $('app').classList.remove('hidden');
     const { publicKey } = await (await fetch('/api/licenses/public-key')).json();
     $('publicKey').textContent = publicKey;
+    await Promise.all([loadRequests(), loadPlans()]);
   } catch (e) { show(errMsg(e), false); }
 }
+$('reqFilter').onchange = () => loadRequests().catch((e) => show(errMsg(e), false));
+$('savePlansBtn').onclick = async () => {
+  const prices = { supermarket: {}, phones: {} };
+  for (const t of ['supermarket', 'phones']) for (const p of ['month', 'year', 'life']) {
+    const v = $('p-' + t + '-' + p).value.trim(); prices[t][p] = v === '' ? null : Number(v);
+  }
+  try { await api('/api/admin/plans', { method: 'POST', body: JSON.stringify({ prices, paymentInfo: $('paymentInfo').value }) }); show('انحفظت الأسعار'); }
+  catch (e) { show(errMsg(e), false); }
+};
 
 $('loginBtn').onclick = enter;
 $('adminKey').onkeydown = (e) => { if (e.key === 'Enter') enter(); };
@@ -166,7 +232,7 @@ $('copyEnv').onclick = async () => {
 $('createBtn').onclick = async () => {
   const btn = $('createBtn'); btn.disabled = true;
   try {
-    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ plan: $('plan').value, email: $('email').value, note: $('note').value, count: Number($('count').value) || 1, maxDevices: Number($('maxDevices').value) || 1 }) });
+    const { licenses } = await api('/api/admin/licenses', { method: 'POST', body: JSON.stringify({ period: $('plan').value, businessType: $('bizType').value, email: $('email').value, note: $('note').value, count: Number($('count').value) || 1, maxDevices: Number($('maxDevices').value) || 1 }) });
     $('created').innerHTML = '<p class="muted" style="margin-top:12px">المفاتيح الجديدة (انسخ وابعت للزبون):</p>' +
       licenses.map((l) => '<div class="lic"><span><span class="mono"><b>' + esc(l.key) + '</b></span>' + (l.email ? ' <span class="muted" dir="ltr">' + esc(l.email) + '</span>' : '') + '</span><button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button></div>').join('');
     show('تم إنشاء ' + licenses.length + ' مفتاح');
@@ -176,6 +242,17 @@ $('createBtn').onclick = async () => {
 };
 document.addEventListener('click', async (e) => {
   const t = e.target;
+  if (t.dataset.approve) {
+    const n = prompt('كم جهاز مسموح لهالزبون؟ (1 - 20)', '1');
+    if (n !== null) {
+      try { const { license } = await api('/api/admin/requests/' + encodeURIComponent(t.dataset.approve) + '/approve', { method: 'POST', body: JSON.stringify({ maxDevices: Number(n) || 1 }) }); show('تمت الموافقة. المفتاح ' + license.key + ' رح يتفعّل عند الزبون لحالو'); loadRequests(); load(); }
+      catch (err) { show(errMsg(err), false); }
+    }
+  }
+  if (t.dataset.reject && confirm('رفض هالطلب؟')) {
+    try { await api('/api/admin/requests/' + encodeURIComponent(t.dataset.reject) + '/reject', { method: 'POST' }); show('انرفض الطلب'); loadRequests(); }
+    catch (err) { show(errMsg(err), false); }
+  }
   if (t.dataset.copy) { await navigator.clipboard.writeText(t.dataset.copy); show('تم نسخ المفتاح'); }
   if (t.dataset.revoke && confirm('إلغاء المفتاح ' + t.dataset.revoke + '؟ البرنامج عند الزبون سيتوقف عند أول اتصال بالإنترنت.')) {
     try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.revoke) + '/revoke', { method: 'POST' }); show('تم الإلغاء'); load(); }

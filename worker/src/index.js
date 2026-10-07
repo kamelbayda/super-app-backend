@@ -9,6 +9,13 @@
  *   /api/admin/licenses...        (header x-admin-key = ADMIN_API_KEY secret)
  *   GET  /admin                   browser admin page (works from a phone/tablet)
  *
+ * Subscriptions (self-service sign-up, approved by the admin):
+ *   GET  /api/plans               business types, periods, prices and payment instructions
+ *   POST /api/requests            { businessType, period, shopName, ownerName, email, phone, note } -> { id, secret }
+ *   GET  /api/requests/:id?secret=  status; once approved it carries the licence key
+ *   /api/admin/requests...        list, approve (creates the key), reject
+ *   GET/POST /api/admin/plans     prices and payment instructions shown to customers
+ *
  * The ECDSA P-256 signing key pair is generated on first use and stored in D1,
  * so no key needs to be created or pasted by hand.
  *
@@ -20,7 +27,18 @@
  */
 import { ADMIN_PAGE } from './admin-page.js';
 
-const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const YEAR_MS = 365 * DAY_MS;
+// Subscription periods. The licences table only allows plan 'year' | 'life', so a monthly
+// key is stored as plan 'year' with period 'month'; the period decides the expiry.
+const PERIODS = { month: 30 * DAY_MS, year: YEAR_MS, life: null };
+const BUSINESS_TYPES = ['supermarket', 'phones'];
+const periodOf = (row) => row.period || row.plan;
+const DEFAULT_PLANS = {
+  currency: '$',
+  prices: { supermarket: { month: null, year: null, life: null }, phones: { month: null, year: null, life: null } },
+  paymentInfo: '',
+};
 const KEY_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
 const ECDSA = { name: 'ECDSA', namedCurve: 'P-256' };
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' };
@@ -57,6 +75,21 @@ function prepare(env) {
           last_seen_at INTEGER
         )`),
         env.DB.prepare(`CREATE TABLE IF NOT EXISTS config (k TEXT PRIMARY KEY, v TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS subscription_requests (
+          id TEXT PRIMARY KEY,
+          secret TEXT NOT NULL,
+          business_type TEXT NOT NULL,
+          period TEXT NOT NULL,
+          shop_name TEXT,
+          owner_name TEXT,
+          email TEXT,
+          phone TEXT,
+          note TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          license_key TEXT,
+          created_at INTEGER NOT NULL,
+          decided_at INTEGER
+        )`),
         env.DB.prepare(`CREATE TABLE IF NOT EXISTS license_devices (
           key TEXT NOT NULL,
           device_id TEXT NOT NULL,
@@ -81,6 +114,12 @@ async function migrate(env) {
   }
   if (!results.some((c) => c.name === 'email')) {
     await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN email TEXT`).run().catch(() => {});
+  }
+  if (!results.some((c) => c.name === 'period')) {
+    await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN period TEXT`).run().catch(() => {});
+  }
+  if (!results.some((c) => c.name === 'business_type')) {
+    await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN business_type TEXT`).run().catch(() => {});
   }
   await env.DB.prepare(
     `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
@@ -124,6 +163,18 @@ function generateLicenseKey() {
   }
   return `POS-${groups.join('-')}`;
 }
+/** Inserts a new key (retrying on the unlikely key collision). */
+async function createLicense(env, { period, businessType, note, email, maxDevices }) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await env.DB.prepare(
+      `INSERT OR IGNORE INTO licenses (key, plan, period, business_type, note, email, created_at, max_devices)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    ).bind(generateLicenseKey(), period === 'life' ? 'life' : 'year', period, businessType, note, email, Date.now(), maxDevices).first();
+    if (row) return row;
+  }
+  return null;
+}
+
 const clampDevices = (n) => Math.min(Math.max(parseInt(n || 1, 10) || 1, 1), 20);
 const normalizeKey = (k) => String(k || '').trim().toUpperCase();
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -135,7 +186,8 @@ function cleanEmail(value) {
 }
 const iso = (ms) => (ms == null ? null : new Date(ms).toISOString());
 const toPublic = (r) => ({
-  key: r.key, plan: r.plan, status: r.status, note: r.note, email: r.email ?? null, deviceId: r.device_id, shopName: r.shop_name,
+  key: r.key, plan: r.plan, period: periodOf(r), businessType: r.business_type || 'supermarket',
+  status: r.status, note: r.note, email: r.email ?? null, deviceId: r.device_id, shopName: r.shop_name,
   maxDevices: r.max_devices ?? 1, devices: r.device_count ?? (r.device_id ? 1 : 0),
   createdAt: iso(r.created_at), activatedAt: iso(r.activated_at), expiresAt: iso(r.expires_at), lastSeenAt: iso(r.last_seen_at),
 });
@@ -188,7 +240,8 @@ async function checkLicense(request, env, { bind }) {
     if (!added.meta?.changes) return fail(409, 'device_mismatch');
     // The subscription clock starts on the very first activation only, so adding or moving
     // computers (reset-device) does not extend it.
-    const expires = row.plan === 'year' ? now + YEAR_MS : null;
+    const span = PERIODS[periodOf(row)];
+    const expires = span ? now + span : null;
     await env.DB.prepare(
       `UPDATE licenses SET device_id = COALESCE(device_id, ?), shop_name = COALESCE(?, shop_name), email = COALESCE(email, ?), last_seen_at = ?,
          expires_at = CASE WHEN activated_at IS NULL THEN ? ELSE expires_at END,
@@ -205,10 +258,59 @@ async function checkLicense(request, env, { bind }) {
   if (row.expires_at && row.expires_at < now) return fail(410, 'expired');
 
   const token = await signLicense(
-    { v: 1, key: row.key, deviceId, shop: row.shop_name, plan: row.plan, issuedAt: now, expiresAt: row.expires_at ?? null },
+    { v: 1, key: row.key, deviceId, shop: row.shop_name, plan: row.plan, period: periodOf(row),
+      businessType: row.business_type || 'supermarket', issuedAt: now, expiresAt: row.expires_at ?? null },
     privateKey
   );
   return json({ ok: true, token, license: toPublic(row) });
+}
+
+// ---------- subscriptions ----------
+async function readPlans(env) {
+  const row = await env.DB.prepare(`SELECT v FROM config WHERE k = 'plans'`).first();
+  const saved = row ? JSON.parse(row.v) : {};
+  const plans = JSON.parse(JSON.stringify(DEFAULT_PLANS));
+  for (const type of BUSINESS_TYPES) Object.assign(plans.prices[type], saved.prices?.[type] || {});
+  if (saved.paymentInfo) plans.paymentInfo = saved.paymentInfo;
+  if (saved.currency) plans.currency = saved.currency;
+  return plans;
+}
+
+const requestPublic = (r) => ({
+  id: r.id, businessType: r.business_type, period: r.period, shopName: r.shop_name, ownerName: r.owner_name,
+  email: r.email, phone: r.phone, note: r.note, status: r.status, licenseKey: r.license_key,
+  createdAt: iso(r.created_at), decidedAt: iso(r.decided_at),
+});
+
+const randomId = (bytes) => b64url(crypto.getRandomValues(new Uint8Array(bytes)));
+
+async function createRequest(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  if (rateLimited(ip)) return fail(429, 'rate_limited');
+  const body = await request.json().catch(() => ({}));
+  const businessType = String(body.businessType || '');
+  const period = String(body.period || '');
+  const text = (v, n) => String(v || '').trim().slice(0, n) || null;
+  const email = cleanEmail(body.email);
+  const phone = text(body.phone, 40);
+  if (!BUSINESS_TYPES.includes(businessType) || !(period in PERIODS)) return fail(400, 'bad_request');
+  if (!email) return fail(400, 'bad_email');
+  if (!phone) return fail(400, 'bad_phone');
+  await prepare(env);
+  const id = randomId(9);
+  const secret = randomId(18);
+  await env.DB.prepare(
+    `INSERT INTO subscription_requests (id, secret, business_type, period, shop_name, owner_name, email, phone, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(id, secret, businessType, period, text(body.shopName, 200), text(body.ownerName, 120), email, phone, text(body.note, 500), Date.now()).run();
+  return json({ ok: true, id, secret }, 201);
+}
+
+async function requestStatus(env, id, secret) {
+  await prepare(env);
+  const r = await env.DB.prepare(`SELECT * FROM subscription_requests WHERE id = ?`).bind(id).first();
+  if (!r || !safeEqual(secret, r.secret)) return fail(404, 'not_found');
+  return json({ ok: true, status: r.status, period: r.period, businessType: r.business_type, licenseKey: r.status === 'approved' ? r.license_key : null });
 }
 
 // ---------- admin endpoints ----------
@@ -222,7 +324,11 @@ async function admin(request, env, path) {
 
   if (path === '/api/admin/licenses' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
-    if (body.plan !== 'year' && body.plan !== 'life') return fail(400, 'bad_plan');
+    // `period` (month | year | life) is the new way; `plan` (year | life) is still accepted
+    const period = body.period || body.plan;
+    if (!(period in PERIODS)) return fail(400, 'bad_plan');
+    const businessType = body.businessType || 'supermarket';
+    if (!BUSINESS_TYPES.includes(businessType)) return fail(400, 'bad_business_type');
     const count = Math.min(Math.max(parseInt(body.count || 1, 10) || 1, 1), 100);
     const note = body.note ? String(body.note).slice(0, 500) : null;
     const email = cleanEmail(body.email);
@@ -230,8 +336,7 @@ async function admin(request, env, path) {
     const maxDevices = clampDevices(body.maxDevices);
     const created = [];
     for (let i = 0; i < count; i++) {
-      const row = await env.DB.prepare(`INSERT OR IGNORE INTO licenses (key, plan, note, email, created_at, max_devices) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`)
-        .bind(generateLicenseKey(), body.plan, note, email || null, Date.now(), maxDevices).first();
+      const row = await createLicense(env, { period, businessType, note, email: email || null, maxDevices });
       if (row) created.push(toPublic(row));
     }
     return json({ ok: true, licenses: created }, 201);
@@ -250,6 +355,50 @@ async function admin(request, env, path) {
        FROM licenses ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 500`
     ).bind(...params).all();
     return json({ ok: true, licenses: results.map(toPublic) });
+  }
+
+  if (path === '/api/admin/plans' && request.method === 'GET') return json({ ok: true, plans: await readPlans(env) });
+  if (path === '/api/admin/plans' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const plans = await readPlans(env);
+    for (const type of BUSINESS_TYPES) {
+      for (const period of Object.keys(PERIODS)) {
+        const v = body.prices?.[type]?.[period];
+        if (v !== undefined) plans.prices[type][period] = v === null || v === '' ? null : Math.max(0, Number(v) || 0);
+      }
+    }
+    if (typeof body.paymentInfo === 'string') plans.paymentInfo = body.paymentInfo.slice(0, 1000);
+    if (typeof body.currency === 'string' && body.currency.trim()) plans.currency = body.currency.trim().slice(0, 5);
+    await env.DB.prepare(`INSERT INTO config (k, v) VALUES ('plans', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`).bind(JSON.stringify(plans)).run();
+    return json({ ok: true, plans });
+  }
+  if (path === '/api/admin/requests' && request.method === 'GET') {
+    const status = url.searchParams.get('status');
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM subscription_requests ${status ? 'WHERE status = ?' : ''} ORDER BY created_at DESC LIMIT 300`
+    ).bind(...(status ? [status] : [])).all();
+    return json({ ok: true, requests: results.map(requestPublic) });
+  }
+  const rq = path.match(/^\/api\/admin\/requests\/([^/]+)\/(approve|reject)$/);
+  if (rq && request.method === 'POST') {
+    const req = await env.DB.prepare(`SELECT * FROM subscription_requests WHERE id = ?`).bind(rq[1]).first();
+    if (!req) return fail(404, 'not_found');
+    if (req.status !== 'pending') return fail(409, 'already_decided');
+    const now = Date.now();
+    if (rq[2] === 'reject') {
+      await env.DB.prepare(`UPDATE subscription_requests SET status = 'rejected', decided_at = ? WHERE id = ?`).bind(now, req.id).run();
+      return json({ ok: true });
+    }
+    const body = await request.json().catch(() => ({}));
+    const lic = await createLicense(env, {
+      period: req.period, businessType: req.business_type,
+      note: [req.shop_name, req.owner_name, req.phone].filter(Boolean).join(' · ').slice(0, 500) || null,
+      email: req.email, maxDevices: clampDevices(body.maxDevices),
+    });
+    if (!lic) return fail(500, 'server_error');
+    await env.DB.prepare(`UPDATE subscription_requests SET status = 'approved', license_key = ?, decided_at = ? WHERE id = ?`)
+      .bind(lic.key, now, req.id).run();
+    return json({ ok: true, license: toPublic(lic) });
   }
 
   const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices|email)$/);
@@ -295,6 +444,13 @@ export default {
         const { publicSpki } = await prepare(env);
         return json({ ok: true, publicKey: publicSpki });
       }
+      if (path === '/api/plans' && request.method === 'GET') {
+        await prepare(env);
+        return json({ ok: true, businessTypes: BUSINESS_TYPES, periods: Object.keys(PERIODS), plans: await readPlans(env) });
+      }
+      if (path === '/api/requests' && request.method === 'POST') return await createRequest(request, env);
+      const reqStatus = path.match(/^\/api\/requests\/([A-Za-z0-9_-]+)$/);
+      if (reqStatus && request.method === 'GET') return await requestStatus(env, reqStatus[1], url.searchParams.get('secret') || '');
       if (path.startsWith('/api/admin/')) return await admin(request, env, path);
       if (path === '/admin' || path === '/') {
         return new Response(ADMIN_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
