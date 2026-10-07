@@ -160,6 +160,7 @@ function render(list) {
       (l.status !== 'revoked' ? '<button class="secondary" data-devices="' + esc(l.key) + '" data-max="' + (l.maxDevices || 1) + '">عدد الأجهزة</button>' : '') +
       (l.devices && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لأجهزة جديدة</button>' : '') +
       (l.status !== 'revoked' ? '<button class="danger" data-revoke="' + esc(l.key) + '">إلغاء</button>' : '') +
+      '<button class="danger" data-delete="' + esc(l.key) + '" data-active="' + (l.status !== 'revoked' && l.devices ? '1' : '') + '">🗑️ حذف</button>' +
       '</div></div>';
   }).join('') || '<p class="muted">لا يوجد مفاتيح بعد.</p>';
 }
@@ -254,6 +255,16 @@ document.addEventListener('click', async (e) => {
     catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.copy) { await navigator.clipboard.writeText(t.dataset.copy); show('تم نسخ المفتاح'); }
+  if (t.dataset.delete) {
+    const k = t.dataset.delete;
+    const warn = t.dataset.active
+      ? 'تنبيه: المفتاح ' + k + ' مفعّل عند زبون، والبرنامج عنده بيوقف أول ما يتصل بالإنترنت.\\n\\nحذفه نهائياً؟ ما فيك ترجّعه.'
+      : 'حذف المفتاح ' + k + ' نهائياً من اللائحة؟ ما فيك ترجّعه.';
+    if (confirm(warn)) {
+      try { await api('/api/admin/licenses/' + encodeURIComponent(k) + '/delete', { method: 'POST' }); show('انحذف المفتاح'); load(); }
+      catch (err) { show(errMsg(err), false); }
+    }
+  }
   if (t.dataset.revoke && confirm('إلغاء المفتاح ' + t.dataset.revoke + '؟ البرنامج عند الزبون سيتوقف عند أول اتصال بالإنترنت.')) {
     try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.revoke) + '/revoke', { method: 'POST' }); show('تم الإلغاء'); load(); }
     catch (err) { show(errMsg(err), false); }

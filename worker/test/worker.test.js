@@ -177,6 +177,18 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'old-2', shopUid: 'second' }, shopIp)).body.error, 'other_shop');
   });
 
+  await t.test('admin can delete a key for good', async () => {
+    const key = (await post('/api/admin/licenses', { plan: 'year', note: 'to-delete' }, admin)).body.licenses[0].key;
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'del-pc' }, { 'cf-connecting-ip': '10.9.9.8' })).status, 200);
+    assert.equal((await post(`/api/admin/licenses/${key}/delete`, {})).status, 401, 'needs the admin key');
+    const r = await post(`/api/admin/licenses/${key}/delete`, {}, admin);
+    assert.equal(r.body.deleted, key);
+    const left = (await (await fetch(`${BASE}/api/admin/licenses?q=to-delete`, { headers: admin })).json()).licenses;
+    assert.equal(left.length, 0);
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'del-pc' }, { 'cf-connecting-ip': '10.9.9.8' })).body.error, 'invalid_key');
+    assert.equal((await post(`/api/admin/licenses/${key}/delete`, {}, admin)).status, 404);
+  });
+
   await t.test('keys bound before multi-device support keep their device', async () => {
     const key = 'POS-LEGAC-YKEY2-34567';
     sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);
