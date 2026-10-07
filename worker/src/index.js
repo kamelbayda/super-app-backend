@@ -416,6 +416,16 @@ async function admin(request, env, path) {
     return json({ ok: true, license: toPublic(lic) });
   }
 
+  // Deletes a key for good (keys nobody wants any more); an app still using it stops on its next check
+  const del = path.match(/^\/api\/admin\/licenses\/([^/]+)\/delete$/);
+  if (del && request.method === 'POST') {
+    const key = normalizeKey(decodeURIComponent(del[1]));
+    const row = await env.DB.prepare(`DELETE FROM licenses WHERE key = ? RETURNING key`).bind(key).first();
+    if (!row) return fail(404, 'invalid_key');
+    await env.DB.prepare(`DELETE FROM license_devices WHERE key = ?`).bind(key).run();
+    return json({ ok: true, deleted: key });
+  }
+
   const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices|email)$/);
   if (m && request.method === 'POST') {
     const key = normalizeKey(decodeURIComponent(m[1]));
