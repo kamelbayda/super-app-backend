@@ -128,6 +128,14 @@ async function migrate(env) {
   if (!results.some((c) => c.name === 'shop_uid')) {
     await env.DB.prepare(`ALTER TABLE licenses ADD COLUMN shop_uid TEXT`).run().catch(() => {});
   }
+  // What each device reports about itself, shown in the admin device list
+  const { results: devCols } = await env.DB.prepare(`PRAGMA table_info(license_devices)`).all();
+  if (!devCols.some((c) => c.name === 'label')) {
+    await env.DB.prepare(`ALTER TABLE license_devices ADD COLUMN label TEXT`).run().catch(() => {});
+  }
+  if (!devCols.some((c) => c.name === 'shop_name')) {
+    await env.DB.prepare(`ALTER TABLE license_devices ADD COLUMN shop_name TEXT`).run().catch(() => {});
+  }
   await env.DB.prepare(
     `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
      SELECT key, device_id, COALESCE(activated_at, created_at), last_seen_at FROM licenses WHERE device_id IS NOT NULL`
@@ -227,6 +235,7 @@ async function checkLicense(request, env, { bind }) {
   const shopName = String(body.shopName || '').trim().slice(0, 200) || null;
   const ownerEmail = cleanEmail(body.email) || null;
   const shopUid = String(body.shopUid || '').trim().slice(0, 100) || null;
+  const deviceLabel = String(body.deviceLabel || '').trim().slice(0, 120) || null;
   if (!key || !deviceId || deviceId.length > 100) return fail(400, 'bad_request');
 
   const { privateKey } = await prepare(env);
@@ -263,6 +272,10 @@ async function checkLicense(request, env, { bind }) {
       env.DB.prepare(`UPDATE licenses SET last_seen_at = ?, shop_name = COALESCE(?, shop_name) WHERE key = ?`).bind(now, shopName, key),
       env.DB.prepare(`UPDATE license_devices SET last_seen_at = ? WHERE key = ? AND device_id = ?`).bind(now, key, deviceId),
     ]);
+  }
+  if (deviceLabel || shopName) {
+    await env.DB.prepare(`UPDATE license_devices SET label = COALESCE(?, label), shop_name = COALESCE(?, shop_name) WHERE key = ? AND device_id = ?`)
+      .bind(deviceLabel, shopName, key, deviceId).run();
   }
   // The first shop to use the key owns it (also claims keys activated before shops were tracked)
   if (shopUid && !row.shop_uid) {
@@ -424,6 +437,37 @@ async function admin(request, env, path) {
     if (!row) return fail(404, 'invalid_key');
     await env.DB.prepare(`DELETE FROM license_devices WHERE key = ?`).bind(key).run();
     return json({ ok: true, deleted: key });
+  }
+
+  // The devices of a key, and removing one of them (that device stops on its next check)
+  const devList = path.match(/^\/api\/admin\/licenses\/([^/]+)\/devices$/);
+  if (devList && request.method === 'GET') {
+    const key = normalizeKey(decodeURIComponent(devList[1]));
+    const { results } = await env.DB.prepare(
+      `SELECT device_id, label, shop_name, first_seen_at, last_seen_at FROM license_devices WHERE key = ? ORDER BY first_seen_at`
+    ).bind(key).all();
+    return json({ ok: true, devices: results.map((d) => ({
+      deviceId: d.device_id, label: d.label ?? null, shopName: d.shop_name ?? null,
+      firstSeenAt: d.first_seen_at ? new Date(d.first_seen_at).toISOString() : null,
+      lastSeenAt: d.last_seen_at ? new Date(d.last_seen_at).toISOString() : null,
+    })) });
+  }
+  const devRemove = path.match(/^\/api\/admin\/licenses\/([^/]+)\/devices\/([^/]+)\/remove$/);
+  if (devRemove && request.method === 'POST') {
+    const key = normalizeKey(decodeURIComponent(devRemove[1]));
+    const deviceId = decodeURIComponent(devRemove[2]);
+    const gone = await env.DB.prepare(`DELETE FROM license_devices WHERE key = ? AND device_id = ? RETURNING device_id`).bind(key, deviceId).first();
+    if (!gone) return fail(404, 'device_not_found');
+    // keep licenses.device_id pointing at a device that is still there; free the shop when none is left
+    await env.DB.prepare(
+      `UPDATE licenses SET
+         device_id = (SELECT device_id FROM license_devices d WHERE d.key = licenses.key ORDER BY first_seen_at LIMIT 1),
+         shop_uid = CASE WHEN EXISTS (SELECT 1 FROM license_devices d WHERE d.key = licenses.key) THEN shop_uid ELSE NULL END
+       WHERE key = ?`
+    ).bind(key).run();
+    const row = await env.DB.prepare(`SELECT *, (SELECT COUNT(*) FROM license_devices d WHERE d.key = licenses.key) AS device_count
+      FROM licenses WHERE key = ?`).bind(key).first();
+    return json({ ok: true, license: toPublic(row) });
   }
 
   const m = path.match(/^\/api\/admin\/licenses\/([^/]+)\/(revoke|reset-device|devices|email)$/);
