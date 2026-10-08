@@ -189,6 +189,25 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post(`/api/admin/licenses/${key}/delete`, {}, admin)).status, 404);
   });
 
+  await t.test('admin lists the devices of a key and removes one', async () => {
+    const ip = { 'cf-connecting-ip': '10.9.9.7' };
+    const key = (await post('/api/admin/licenses', { plan: 'year', maxDevices: 3, note: 'dev-list' }, admin)).body.licenses[0].key;
+    await post('/api/licenses/activate', { key, deviceId: 'till-1', shopUid: 'S', shopName: 'Shop S', deviceLabel: 'Windows · Chrome' }, ip);
+    await post('/api/licenses/activate', { key, deviceId: 'ipad-1', shopUid: 'S', shopName: 'Shop S', deviceLabel: 'iPad · Safari' }, ip);
+    const list = await (await fetch(`${BASE}/api/admin/licenses/${key}/devices`, { headers: admin })).json();
+    assert.deepEqual(list.devices.map((d) => [d.deviceId, d.label, d.shopName]), [['till-1', 'Windows · Chrome', 'Shop S'], ['ipad-1', 'iPad · Safari', 'Shop S']]);
+    assert.equal((await fetch(`${BASE}/api/admin/licenses/${key}/devices`)).status, 401);
+    const r = await post(`/api/admin/licenses/${key}/devices/till-1/remove`, {}, admin);
+    assert.equal(r.body.license.devices, 1);
+    assert.equal(r.body.license.deviceId, 'ipad-1', 'main device moves to one still there');
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'till-1', shopUid: 'S' }, ip)).status, 409, 'removed device stops');
+    assert.equal((await post('/api/licenses/refresh', { key, deviceId: 'ipad-1', shopUid: 'S' }, ip)).status, 200);
+    assert.equal((await post(`/api/admin/licenses/${key}/devices/nope/remove`, {}, admin)).status, 404);
+    // removing the last device frees the shop as well
+    await post(`/api/admin/licenses/${key}/devices/ipad-1/remove`, {}, admin);
+    assert.equal((await post('/api/licenses/activate', { key, deviceId: 'other-shop-pc', shopUid: 'T' }, ip)).status, 200);
+  });
+
   await t.test('keys bound before multi-device support keep their device', async () => {
     const key = 'POS-LEGAC-YKEY2-34567';
     sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);

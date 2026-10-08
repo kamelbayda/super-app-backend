@@ -34,6 +34,10 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
   .lic:first-child { border-top:0; }
   .lic .actions { display:flex; gap:6px; flex-wrap:wrap; }
   .lic .actions button { padding:6px 10px; font-size:13px; }
+  .devs { width:100%; }
+  .devs:empty { display:none; }
+  .dev { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; background:rgba(127,127,127,.08); border-radius:10px; padding:8px 10px; margin-top:6px; }
+  .dev button { padding:5px 10px; font-size:12px; }
   .keybox { word-break:break-all; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; }
   #msg { position:sticky; top:0; z-index:5; }
   .note { padding:10px 12px; border-radius:8px; margin-bottom:12px; }
@@ -130,11 +134,31 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح', already_decided: 'هالطلب انعملو قرار من قبل' };
+const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح', already_decided: 'هالطلب انعملو قرار من قبل', device_not_found: 'هالجهاز مش مرتبط بالمفتاح' };
 const PERIOD = { month: 'شهري', year: 'سنوي', life: 'مدى الحياة' };
 const BIZ = { supermarket: '🛒 سوبرماركت', phones: '📱 محل تلفونات' };
 const errMsg = (e) => ERR[e.message] || ('خطأ: ' + e.message);
 const date = (s) => s ? new Date(s).toLocaleDateString('ar-LB') : '—';
+
+const ago = (s) => {
+  if (!s) return '—';
+  const m = Math.round((Date.now() - new Date(s).getTime()) / 60000);
+  if (m < 2) return 'هلّق';
+  if (m < 60) return 'من ' + m + ' دقيقة';
+  if (m < 1440) return 'من ' + Math.round(m / 60) + ' ساعة';
+  return 'من ' + Math.round(m / 1440) + ' يوم';
+};
+async function showDevices(key) {
+  const box = $('devs-' + key);
+  if (!box) return;
+  const { devices } = await api('/api/admin/licenses/' + encodeURIComponent(key) + '/devices');
+  box.innerHTML = devices.map((d, i) =>
+    '<div class="dev"><div>' +
+      '<div><b>' + (i + 1) + '. ' + esc(d.label || 'جهاز') + '</b>' + (d.shopName ? ' · 🏪 ' + esc(d.shopName) : '') + '</div>' +
+      '<div class="muted">أول تفعيل: ' + date(d.firstSeenAt) + ' · آخر اتصال: ' + ago(d.lastSeenAt) + ' · <span class="mono" dir="ltr">' + esc(d.deviceId.slice(0, 8)) + '</span></div>' +
+    '</div><button class="danger" data-remove-device="' + esc(d.deviceId) + '" data-key="' + esc(key) + '" data-label="' + esc(d.label || 'جهاز') + '">إلغاء هالجهاز</button></div>'
+  ).join('') || '<div class="muted">ما في أجهزة.</div>';
+}
 
 function statusOf(l) {
   if (l.status === 'revoked') return ['revoked', 'ملغى'];
@@ -156,12 +180,13 @@ function render(list) {
       ' · أجهزة: <b>' + (l.devices || 0) + '/' + (l.maxDevices || 1) + '</b></div></div>' +
       '<div class="actions">' +
       '<button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button>' +
+      (l.devices ? '<button class="secondary" data-show-devices="' + esc(l.key) + '">💻 الأجهزة (' + l.devices + ')</button>' : '') +
       '<button class="secondary" data-email="' + esc(l.key) + '" data-current="' + esc(l.email || '') + '">' + (l.email ? 'تعديل الإيميل' : 'إضافة إيميل') + '</button>' +
       (l.status !== 'revoked' ? '<button class="secondary" data-devices="' + esc(l.key) + '" data-max="' + (l.maxDevices || 1) + '">عدد الأجهزة</button>' : '') +
       (l.devices && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لأجهزة جديدة</button>' : '') +
       (l.status !== 'revoked' ? '<button class="danger" data-revoke="' + esc(l.key) + '">إلغاء</button>' : '') +
       '<button class="danger" data-delete="' + esc(l.key) + '" data-active="' + (l.status !== 'revoked' && l.devices ? '1' : '') + '">🗑️ حذف</button>' +
-      '</div></div>';
+      '</div><div class="devs" id="devs-' + esc(l.key) + '"></div></div>';
   }).join('') || '<p class="muted">لا يوجد مفاتيح بعد.</p>';
 }
 
@@ -282,6 +307,20 @@ document.addEventListener('click', async (e) => {
       try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.email) + '/email', { method: 'POST', body: JSON.stringify({ email: v }) }); show('تم حفظ الإيميل'); load(); }
       catch (err) { show(errMsg(err), false); }
     }
+  }
+  if (t.dataset.showDevices) {
+    const box = $('devs-' + t.dataset.showDevices);
+    if (box && box.innerHTML) box.innerHTML = '';
+    else { try { await showDevices(t.dataset.showDevices); } catch (err) { show(errMsg(err), false); } }
+  }
+  if (t.dataset.removeDevice && confirm('إلغاء الجهاز "' + t.dataset.label + '" من المفتاح ' + t.dataset.key + '؟ البرنامج عليه بيوقف أول ما يتصل بالإنترنت، وبيفضى مكانو لجهاز تاني.')) {
+    try {
+      await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.key) + '/devices/' + encodeURIComponent(t.dataset.removeDevice) + '/remove', { method: 'POST' });
+      show('انلغى الجهاز');
+      const k = t.dataset.key;
+      await load();
+      try { await showDevices(k); } catch {}
+    } catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.reset && confirm('فك ارتباط ' + t.dataset.reset + ' بكل الأجهزة الحالية حتى ينفعّل على أجهزة جديدة؟ (مدة الاشتراك لا تتغير)')) {
     try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.reset) + '/reset-device', { method: 'POST' }); show('يمكن الآن تفعيل المفتاح على الأجهزة الجديدة'); load(); }
