@@ -34,6 +34,7 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
   .lic:first-child { border-top:0; }
   .lic .actions { display:flex; gap:6px; flex-wrap:wrap; }
   .lic .actions button { padding:6px 10px; font-size:13px; }
+  .btnlink { display:inline-block; padding:6px 10px; font-size:13px; border-radius:10px; text-decoration:none; border:1px solid var(--line); color:inherit; }
   .devs { width:100%; }
   .devs:empty { display:none; }
   .dev { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; background:rgba(127,127,127,.08); border-radius:10px; padding:8px 10px; margin-top:6px; }
@@ -68,6 +69,16 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
         <select id="reqFilter" style="flex:0 1 200px"><option value="pending">بانتظار الموافقة</option><option value="">كل الطلبات</option><option value="approved">الموافق عليها</option><option value="rejected">المرفوضة</option></select>
       </div>
       <div id="requests"></div>
+    </section>
+
+    <section class="card" id="trialsCard">
+      <h2>🧪 مين عم يجرّب البرنامج <span class="pill" id="trialCount"></span></h2>
+      <p class="muted">كل جهاز بيفتح البرنامج بيبيّن هون: المحل، نوعه، صاحب المحل وإيميلو، الجهاز، وكم فاتورة عمل من التجربة. بتتحدّث كل ما يفتح البرنامج.</p>
+      <div class="row" style="margin-bottom:8px">
+        <select id="trialFilter" style="flex:0 1 200px"><option value="trial">بالتجربة بس</option><option value="">الكل</option><option value="licensed">المشتركين</option></select>
+        <input id="trialQ" placeholder="بحث: محل، إيميل، اسم، تلفون" style="flex:1 1 200px">
+      </div>
+      <div id="trials"></div>
     </section>
 
     <section class="card">
@@ -226,6 +237,30 @@ async function loadPlans() {
   $('paymentInfo').value = plans.paymentInfo || '';
 }
 
+const FLAG = (c) => c && c.length === 2 ? String.fromCodePoint(...[...c.toUpperCase()].map((x) => 127397 + x.charCodeAt(0))) : '';
+async function loadTrials() {
+  const f = $('trialFilter').value; const q = $('trialQ').value.trim();
+  const qs = [f ? 'status=' + f : '', q ? 'q=' + encodeURIComponent(q) : ''].filter(Boolean).join('&');
+  const { trials } = await api('/api/admin/trials' + (qs ? '?' + qs : ''));
+  $('trialCount').textContent = trials.length;
+  $('trials').innerHTML = trials.map((t) => {
+    const fresh = Date.now() - new Date(t.lastSeenAt).getTime() < 24 * 3600 * 1000;
+    const wa = t.ownerPhone ? 'https://wa.me/' + (t.ownerPhone.replace(/\D/g, '').replace(/^0/, '961').replace(/^(?!961)/, '961')) : '';
+    return '<div class="lic"><div>' +
+      '<div><b>' + (BIZ[t.businessType] || '🏪') + ' ' + esc(t.shopName || 'محل بلا اسم') + '</b> ' +
+        (t.licenseKey ? '<span class="pill active">مشترك</span>' : '<span class="pill">تجربة · ' + (t.invoicesUsed || 0) + '/15 فاتورة</span>') +
+        (fresh ? ' <span class="pill active">نشط اليوم</span>' : '') + '</div>' +
+      '<div class="muted">' + (t.ownerName ? '👤 ' + esc(t.ownerName) + ' · ' : '') + (t.ownerEmail ? '<span dir="ltr">📧 ' + esc(t.ownerEmail) + '</span> · ' : '') +
+        (t.ownerPhone ? '<span dir="ltr">📞 ' + esc(t.ownerPhone) + '</span> · ' : '') + '💻 ' + esc(t.deviceLabel || 'جهاز') + (t.country ? ' · ' + FLAG(t.country) + ' ' + esc(t.country) : '') + '</div>' +
+      '<div class="muted">أول مرّة: ' + date(t.firstSeenAt) + ' · آخر مرّة: ' + ago(t.lastSeenAt) + (t.licenseKey ? ' · <span class="mono">' + esc(t.licenseKey) + '</span>' : '') + '</div>' +
+      '</div><div class="actions">' +
+        (t.ownerEmail ? '<button class="secondary" data-copy="' + esc(t.ownerEmail) + '">نسخ الإيميل</button>' : '') +
+        (wa ? '<a class="secondary btnlink" href="' + esc(wa) + '" target="_blank" rel="noopener">واتساب</a>' : '') +
+        '<button class="danger" data-del-trial="' + esc(t.deviceId) + '">🗑️</button>' +
+      '</div></div>';
+  }).join('') || '<p class="muted">ما في حدا بعد.</p>';
+}
+
 async function enter() {
   adminKey = $('adminKey').value.trim() || adminKey;
   try {
@@ -234,10 +269,12 @@ async function enter() {
     $('login').classList.add('hidden'); $('app').classList.remove('hidden');
     const { publicKey } = await (await fetch('/api/licenses/public-key')).json();
     $('publicKey').textContent = publicKey;
-    await Promise.all([loadRequests(), loadPlans()]);
+    await Promise.all([loadRequests(), loadPlans(), loadTrials()]);
   } catch (e) { show(errMsg(e), false); }
 }
 $('reqFilter').onchange = () => loadRequests().catch((e) => show(errMsg(e), false));
+$('trialFilter').onchange = () => loadTrials().catch((e) => show(errMsg(e), false));
+$('trialQ').oninput = () => { clearTimeout(loadTrials.t); loadTrials.t = setTimeout(() => loadTrials().catch(() => {}), 300); };
 $('savePlansBtn').onclick = async () => {
   const prices = { supermarket: {}, phones: {} };
   for (const t of ['supermarket', 'phones']) for (const p of ['month', 'year', 'life']) {
@@ -307,6 +344,10 @@ document.addEventListener('click', async (e) => {
       try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.email) + '/email', { method: 'POST', body: JSON.stringify({ email: v }) }); show('تم حفظ الإيميل'); load(); }
       catch (err) { show(errMsg(err), false); }
     }
+  }
+  if (t.dataset.delTrial && confirm('شيل هالجهاز من لائحة التجربة؟ (إذا رجع فتح البرنامج بيرجع يبيّن)')) {
+    try { await api('/api/admin/trials/' + encodeURIComponent(t.dataset.delTrial) + '/delete', { method: 'POST' }); loadTrials(); }
+    catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.showDevices) {
     const box = $('devs-' + t.dataset.showDevices);

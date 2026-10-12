@@ -28,7 +28,10 @@ test.after(() => { proc?.kill(); rmSync(persist, { recursive: true, force: true 
 const sql = (command) =>
   execFileSync(wrangler, ['d1', 'execute', 'pos-licensing', '--local', '--persist-to', persist, '--command', command], { stdio: 'pipe' });
 const post = async (path, body, headers = {}) => {
-  const res = await fetch(BASE + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body || {}) });
+  const send = () => fetch(BASE + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body || {}) });
+  // The local server sometimes drops one connection right after sql() wrote to its database from
+  // another process; that is the test harness, not the worker, so retry a dropped connection once.
+  const res = await send().catch(async () => { await new Promise((r) => setTimeout(r, 500)); return send(); });
   return { status: res.status, body: await res.json() };
 };
 const admin = { 'x-admin-key': ADMIN };
@@ -206,6 +209,31 @@ test('licence API on Workers', async (t) => {
     // removing the last device frees the shop as well
     await post(`/api/admin/licenses/${key}/devices/ipad-1/remove`, {}, admin);
     assert.equal((await post('/api/licenses/activate', { key, deviceId: 'other-shop-pc', shopUid: 'T' }, ip)).status, 200);
+  });
+
+  await t.test('trial devices report themselves and show on the admin page', async () => {
+    const ip = { 'cf-connecting-ip': '10.9.9.6', 'cf-ipcountry': 'LB' };
+    assert.equal((await post('/api/trials/ping', {}, ip)).status, 400);
+    const ping = await post('/api/trials/ping', { deviceId: 'trial-1', shopUid: 'u1', shopName: 'Mobile Center', businessType: 'phones',
+      ownerName: 'Ali', ownerEmail: 'Ali@Shop.com', ownerPhone: '70123456', deviceLabel: 'iPad · Safari', invoicesUsed: 3 }, ip);
+    assert.equal(ping.status, 200);
+    // a later ping updates the counters but keeps what it does not send
+    await post('/api/trials/ping', { deviceId: 'trial-1', invoicesUsed: 7, businessType: 'nonsense' }, ip);
+    await post('/api/trials/ping', { deviceId: 'paid-1', shopName: 'Paid Shop', businessType: 'supermarket', licenseKey: 'POS-AAAAA-BBBBB-CCCCC' }, ip);
+    assert.equal((await fetch(`${BASE}/api/admin/trials`)).status, 401);
+    const all = (await (await fetch(`${BASE}/api/admin/trials`, { headers: admin })).json()).trials;
+    const t1 = all.find((x) => x.deviceId === 'trial-1');
+    assert.equal(t1.shopName, 'Mobile Center');
+    assert.equal(t1.businessType, 'phones');
+    assert.equal(t1.ownerEmail, 'ali@shop.com');
+    assert.equal(t1.invoicesUsed, 7);
+    assert.equal(t1.country, 'LB');
+    const trialsOnly = (await (await fetch(`${BASE}/api/admin/trials?status=trial`, { headers: admin })).json()).trials.map((x) => x.deviceId);
+    assert.ok(trialsOnly.includes('trial-1') && !trialsOnly.includes('paid-1'));
+    const found = (await (await fetch(`${BASE}/api/admin/trials?q=7012`, { headers: admin })).json()).trials.map((x) => x.deviceId);
+    assert.deepEqual(found, ['trial-1']);
+    assert.equal((await post('/api/admin/trials/trial-1/delete', {}, admin)).status, 200);
+    assert.equal((await post('/api/admin/trials/trial-1/delete', {}, admin)).status, 404);
   });
 
   await t.test('keys bound before multi-device support keep their device', async () => {

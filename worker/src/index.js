@@ -28,6 +28,9 @@
  * A key belongs to ONE shop: the app sends its shop id (shared by the shop's computers through
  * cloud sync, different for every shop, even several shops on one browser). The first shop
  * that uses the key owns it; another shop gets 'other_shop'. reset-device frees it.
+ *
+ * Trials: every install reports itself now and then (POST /api/trials/ping: shop, type, owner,
+ * device, invoices used, licensed or not), so the admin page lists who is trying the program.
  */
 import { ADMIN_PAGE } from './admin-page.js';
 
@@ -100,6 +103,21 @@ function prepare(env) {
           first_seen_at INTEGER NOT NULL,
           last_seen_at INTEGER,
           PRIMARY KEY (key, device_id)
+        )`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS trial_devices (
+          device_id TEXT PRIMARY KEY,
+          shop_uid TEXT,
+          shop_name TEXT,
+          business_type TEXT,
+          owner_name TEXT,
+          owner_email TEXT,
+          owner_phone TEXT,
+          device_label TEXT,
+          invoices_used INTEGER NOT NULL DEFAULT 0,
+          license_key TEXT,
+          country TEXT,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL
         )`),
       ]);
       await migrate(env);
@@ -293,6 +311,42 @@ async function checkLicense(request, env, { bind }) {
   return json({ ok: true, token, license: toPublic(row) });
 }
 
+// ---------- trials: who is using the program ----------
+const trialHits = new Map();
+async function trialPing(request, env) {
+  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
+  const now = Date.now();
+  const e = trialHits.get(ip);
+  if (!e || now - e.start > 10 * 60 * 1000) trialHits.set(ip, { start: now, count: 1 });
+  else if (++e.count > 60) return fail(429, 'rate_limited');
+  const body = await request.json().catch(() => ({}));
+  const t = (v, n) => String(v ?? '').trim().slice(0, n) || null;
+  const deviceId = t(body.deviceId, 100);
+  if (!deviceId) return fail(400, 'bad_request');
+  const businessType = BUSINESS_TYPES.includes(body.businessType) ? body.businessType : null;
+  const invoices = Math.max(0, Math.min(1e6, Math.floor(Number(body.invoicesUsed) || 0)));
+  await prepare(env);
+  await env.DB.prepare(
+    `INSERT INTO trial_devices (device_id, shop_uid, shop_name, business_type, owner_name, owner_email, owner_phone, device_label, invoices_used, license_key, country, first_seen_at, last_seen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(device_id) DO UPDATE SET
+       shop_uid = COALESCE(excluded.shop_uid, shop_uid), shop_name = COALESCE(excluded.shop_name, shop_name),
+       business_type = COALESCE(excluded.business_type, business_type), owner_name = COALESCE(excluded.owner_name, owner_name),
+       owner_email = COALESCE(excluded.owner_email, owner_email), owner_phone = COALESCE(excluded.owner_phone, owner_phone),
+       device_label = COALESCE(excluded.device_label, device_label), invoices_used = excluded.invoices_used,
+       license_key = excluded.license_key, country = COALESCE(excluded.country, country), last_seen_at = excluded.last_seen_at`
+  ).bind(deviceId, t(body.shopUid, 100), t(body.shopName, 200), businessType, t(body.ownerName, 120), cleanEmail(body.ownerEmail) || null,
+    t(body.ownerPhone, 40), t(body.deviceLabel, 120), invoices, t(body.licenseKey, 40), t(request.headers.get('cf-ipcountry'), 4), now, now).run();
+  return json({ ok: true });
+}
+
+const trialPublic = (r) => ({
+  deviceId: r.device_id, shopUid: r.shop_uid, shopName: r.shop_name, businessType: r.business_type,
+  ownerName: r.owner_name, ownerEmail: r.owner_email, ownerPhone: r.owner_phone, deviceLabel: r.device_label,
+  invoicesUsed: r.invoices_used, licenseKey: r.license_key, country: r.country,
+  firstSeenAt: new Date(r.first_seen_at).toISOString(), lastSeenAt: new Date(r.last_seen_at).toISOString(),
+});
+
 // ---------- subscriptions ----------
 async function readPlans(env) {
   const row = await env.DB.prepare(`SELECT v FROM config WHERE k = 'plans'`).first();
@@ -399,6 +453,28 @@ async function admin(request, env, path) {
     if (typeof body.currency === 'string' && body.currency.trim()) plans.currency = body.currency.trim().slice(0, 5);
     await env.DB.prepare(`INSERT INTO config (k, v) VALUES ('plans', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`).bind(JSON.stringify(plans)).run();
     return json({ ok: true, plans });
+  }
+  if (path === '/api/admin/trials' && request.method === 'GET') {
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const status = url.searchParams.get('status'); // 'trial' | 'licensed' | ''
+    const where = [];
+    const args = [];
+    if (status === 'trial') where.push('license_key IS NULL');
+    if (status === 'licensed') where.push('license_key IS NOT NULL');
+    if (q) {
+      where.push(`(LOWER(COALESCE(shop_name,'')) LIKE ? OR LOWER(COALESCE(owner_email,'')) LIKE ? OR LOWER(COALESCE(owner_name,'')) LIKE ? OR COALESCE(owner_phone,'') LIKE ?)`);
+      args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    const { results } = await env.DB.prepare(
+      `SELECT * FROM trial_devices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY last_seen_at DESC LIMIT 500`
+    ).bind(...args).all();
+    return json({ ok: true, trials: results.map(trialPublic) });
+  }
+  const trialDel = path.match(/^\/api\/admin\/trials\/([^/]+)\/delete$/);
+  if (trialDel && request.method === 'POST') {
+    const gone = await env.DB.prepare(`DELETE FROM trial_devices WHERE device_id = ? RETURNING device_id`).bind(decodeURIComponent(trialDel[1])).first();
+    if (!gone) return fail(404, 'not_found');
+    return json({ ok: true });
   }
   if (path === '/api/admin/requests' && request.method === 'GET') {
     const status = url.searchParams.get('status');
@@ -518,6 +594,7 @@ export default {
         return json({ ok: true, businessTypes: BUSINESS_TYPES, periods: Object.keys(PERIODS), plans: await readPlans(env) });
       }
       if (path === '/api/requests' && request.method === 'POST') return await createRequest(request, env);
+      if (path === '/api/trials/ping' && request.method === 'POST') return await trialPing(request, env);
       const reqStatus = path.match(/^\/api\/requests\/([A-Za-z0-9_-]+)$/);
       if (reqStatus && request.method === 'GET') return await requestStatus(env, reqStatus[1], url.searchParams.get('secret') || '');
       if (path.startsWith('/api/admin/')) return await admin(request, env, path);
