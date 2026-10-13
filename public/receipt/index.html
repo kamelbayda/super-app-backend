@@ -130,6 +130,36 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
 .r-sig img { max-height: 92px; max-width: 100%; }
 .r-note { margin-top: 18px; font-size: .95rem; color: var(--muted); }
 
+/* Tabs and archive */
+.tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.tabs button { border: 0; background: transparent; padding: 6px 14px; border-radius: 7px; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.count { font-variant-numeric: tabular-nums; opacity: .8; }
+.editing { font-size: .85rem; color: var(--muted); }
+.archive { max-width: 1240px; margin-inline: auto; display: grid; gap: 14px; }
+.archive .tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.archive .tools input { max-width: 340px; background: var(--panel); }
+.archive .where { font-size: .85rem; color: var(--muted); }
+.list { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.item { display: grid; grid-template-columns: 70px minmax(0, 1.6fr) minmax(0, 1fr) 110px auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.item.head { font-size: .8rem; color: var(--muted); font-weight: 600; padding-block: 8px; }
+.item .no { font-variant-numeric: tabular-nums; font-weight: 600; }
+.item .who { min-width: 0; }
+.item .who b { display: block; overflow-wrap: anywhere; }
+.item .who small { color: var(--muted); overflow-wrap: anywhere; }
+.item .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.item .dt { font-variant-numeric: tabular-nums; color: var(--muted); }
+.item .act { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.empty { padding: 32px 16px; text-align: center; color: var(--muted); line-height: 1.8; }
+@media (max-width: 700px) {
+  .item.head { display: none; }
+  .item { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .item .amt { grid-column: 2; }
+  .item .dt { grid-column: 1; }
+  .item .act { grid-column: 2; }
+}
+
 /* Image export overlay */
 .overlay { position: fixed; inset: 0; background: rgba(10,14,20,.7); display: grid; place-items: center; padding: 16px; z-index: 10; }
 .overlay .card { background: var(--panel); border-radius: 12px; padding: 16px; max-width: 900px; width: 100%; max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
@@ -139,7 +169,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
 @media print {
   @page { size: A4; margin: 12mm; }
   body { background: #fff; padding: 0; }
-  header.top, .panel, .overlay, .toast { display: none !important; }
+  header.top, .panel, .overlay, .toast, .archive { display: none !important; }
   .app { display: block; }
   .stage { overflow: visible; }
   .receipt { box-shadow: none; max-width: none; min-width: 0; padding: 0; background: #fff; }
@@ -152,16 +182,22 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
 <header class="top">
   <div>
     <h1>إيصال قبض</h1>
-    <p>عبّئ البيانات، وقّع، ثم اطبع الإيصال أو احفظه كصورة.</p>
+    <p>عبّئ البيانات، وقّع، ثم احفظ الإيصال في الأرشيف أو اطبعه.</p>
   </div>
-  <div class="actions">
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tabEdit" aria-selected="true">الإيصال</button>
+    <button type="button" role="tab" id="tabArchive" aria-selected="false">الأرشيف <span class="count" id="archCount"></span></button>
+  </div>
+  <div class="actions" id="editActions">
+    <span class="editing" id="editing" hidden></span>
     <button type="button" id="btnNew" class="ghost">إيصال جديد</button>
+    <button type="button" id="btnSave">حفظ في الأرشيف</button>
     <button type="button" id="btnImage">حفظ كصورة</button>
     <button type="button" id="btnPrint" class="primary" hidden>طباعة</button>
   </div>
 </header>
 
-<main class="app">
+<main class="app" id="viewEdit">
   <form class="panel" id="form" autocomplete="off">
     <fieldset>
       <legend>المؤسسة</legend>
@@ -272,6 +308,14 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
     </article>
   </section>
 </main>
+
+<section class="archive" id="viewArchive" hidden aria-label="أرشيف الإيصالات">
+  <div class="tools">
+    <input id="search" type="search" placeholder="ابحث بالاسم أو رقم الإيصال">
+    <span class="where" id="where">محفوظ على هذا الجهاز فقط</span>
+  </div>
+  <div class="list" id="list"></div>
+</section>
 
 <div class="overlay" id="overlay" hidden>
   <div class="card">
@@ -427,7 +471,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
     });
     function end() { if (!drawing) return; drawing = false; self.onchange && self.onchange(); }
     canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
-    this.clear = function () { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore(); self.dirty = false; self.onchange && self.onchange(); };
+    this.clear = function (notify) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore(); self.dirty = false; if (notify !== false && self.onchange) self.onchange(); };
     this.drawImage = function (src, notify) {
       var img = new Image();
       img.onload = function () {
@@ -513,8 +557,8 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
   }
 
   $('btnNew').addEventListener('click', function () {
-    var n = parseInt($('no').value, 10);
-    $('no').value = isFinite(n) ? n + 1 : 1;
+    $('no').value = nextNumber();
+    setEditing(null);
     $('payee').value = ''; $('reason').value = '';
     $('date').value = todayISO();
     rowsEl.textContent = ''; addRow();
@@ -540,6 +584,186 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
   $('closeOverlay').addEventListener('click', function () { $('overlay').hidden = true; });
   $('overlay').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
 
+  /* ---------- Archive ---------- */
+  var ARCH_KEY = 'receipt-archive-v1';
+  var archive = [];      // newest first
+  var currentId = null;  // archive id of the receipt being edited
+  var dbCol = null;      // shared artifact database, when available
+
+  function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function sortArchive() { archive.sort(function (a, b) { return (b.savedAt || '').localeCompare(a.savedAt || ''); }); }
+  function localLoad() { try { return JSON.parse(localStorage.getItem(ARCH_KEY) || '[]'); } catch (e) { return []; } }
+  function localWrite() { localStorage.setItem(ARCH_KEY, JSON.stringify(archive)); }
+
+  function getState() {
+    var rows = readRows();
+    return {
+      no: $('no').value.trim(), org: $('org').value.trim(), city: $('city').value.trim(),
+      date: $('date').value, currency: $('currency').value,
+      payee: $('payee').value.trim(), reason: $('reason').value.trim(),
+      adminName: $('adminName').value.trim(),
+      rows: rows, total: rows.reduce(function (s, r) { return s + r.a; }, 0),
+      adminSig: padAdmin.toData(), empSig: padEmp.toData()
+    };
+  }
+  function setState(st) {
+    $('no').value = st.no || ''; $('org').value = st.org || ''; $('city').value = st.city || '';
+    $('date').value = st.date || todayISO(); $('currency').value = st.currency || 'LBP';
+    $('payee').value = st.payee || ''; $('reason').value = st.reason || '';
+    $('adminName').value = st.adminName || '';
+    rowsEl.textContent = '';
+    (st.rows && st.rows.length ? st.rows : [{}]).forEach(function (r) {
+      addRow({ y: r.y, m: r.m, a: r.a ? r.a.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '', d: r.d });
+    });
+    // Load signatures without overwriting the remembered admin signature
+    padAdmin.clear(false); padEmp.clear(false);
+    if (st.adminSig) padAdmin.drawImage(st.adminSig, false);
+    if (st.empSig) padEmp.drawImage(st.empSig, false);
+    setSig($('rSigAdmin'), st.adminSig || null); setSig($('rSigEmp'), st.empSig || null);
+    render();
+  }
+
+  function setEditing(id) {
+    currentId = id;
+    var item = id && archive.filter(function (r) { return r.id === id; })[0];
+    $('editing').hidden = !item;
+    if (item) text($('editing'), 'تعديل الإيصال رقم ' + (item.no || '—'));
+    text($('btnSave'), item ? 'حفظ التعديلات' : 'حفظ في الأرشيف');
+  }
+
+  function nextNumber() {
+    var max = 0;
+    archive.forEach(function (r) { var n = parseInt(r.no, 10); if (n > max) max = n; });
+    var cur = parseInt($('no').value, 10) || 0;
+    return Math.max(max, cur) + 1;
+  }
+
+  function saveReceipt() {
+    var st = getState();
+    if (!st.total) { toast('أدخل مبلغ دفعة واحدة على الأقل قبل الحفظ.'); return; }
+    var id = currentId || uid();
+    var existing = archive.filter(function (r) { return r.id === id; })[0];
+    st.id = id;
+    st.createdAt = existing ? existing.createdAt : new Date().toISOString();
+    st.savedAt = new Date().toISOString();
+    var btn = $('btnSave'); btn.disabled = true;
+    var done = function () {
+      archive = archive.filter(function (r) { return r.id !== id; }); archive.push(st); sortArchive();
+      setEditing(id); renderArchive();
+      toast(existing ? 'حُفظت التعديلات' : 'حُفظ الإيصال رقم ' + (st.no || '—') + ' في الأرشيف');
+    };
+    var p;
+    if (dbCol) {
+      var body = JSON.parse(JSON.stringify(st)); delete body.id;
+      p = dbCol.doc(id).set(body);
+    } else {
+      p = new Promise(function (ok) {
+        var prev = archive.slice();
+        archive = archive.filter(function (r) { return r.id !== id; }); archive.push(st);
+        try { localWrite(); } catch (e) { archive = prev; throw e; }
+        ok();
+      });
+    }
+    p.then(done, function (e) {
+      var code = e && e.code;
+      toast(code === 'quota_exceeded' || (e && e.name === 'QuotaExceededError')
+        ? 'الأرشيف ممتلئ. احذف بعض الإيصالات القديمة ثم احفظ مجدداً.'
+        : code === 'invalid_argument' ? 'لا تملك صلاحية الحفظ في هذا الأرشيف.'
+        : 'تعذّر الحفظ. حاول مرة أخرى.');
+    }).then(function () { btn.disabled = false; });
+  }
+
+  function deleteReceipt(id) {
+    var p = dbCol ? dbCol.doc(id).delete() : new Promise(function (ok) {
+      archive = archive.filter(function (r) { return r.id !== id; }); localWrite(); ok();
+    });
+    p.then(function () {
+      archive = archive.filter(function (r) { return r.id !== id; });
+      if (currentId === id) setEditing(null);
+      renderArchive(); toast('حُذف الإيصال');
+    }, function () { toast('تعذّر الحذف. حاول مرة أخرى.'); });
+  }
+
+  function openReceipt(id) {
+    var item = archive.filter(function (r) { return r.id === id; })[0]; if (!item) return;
+    showView('edit');
+    setState(item); setEditing(id);
+  }
+
+  var pendingDelete = null;
+  function renderArchive() {
+    text($('archCount'), archive.length ? '(' + archive.length + ')' : '');
+    var q = $('search').value.trim().toLowerCase();
+    var items = archive.filter(function (r) {
+      return !q || String(r.no || '').toLowerCase().indexOf(q) >= 0 || (r.payee || '').toLowerCase().indexOf(q) >= 0 || (r.reason || '').toLowerCase().indexOf(q) >= 0;
+    });
+    var list = $('list'); list.textContent = '';
+    if (!items.length) {
+      var e = document.createElement('div'); e.className = 'empty';
+      e.textContent = archive.length ? 'لا توجد إيصالات تطابق البحث.' : 'لا توجد إيصالات محفوظة بعد. عبّئ إيصالاً واضغط «حفظ في الأرشيف» ليظهر هنا.';
+      list.appendChild(e); return;
+    }
+    var head = document.createElement('div'); head.className = 'item head';
+    ['الرقم', 'الموظف', 'المبلغ', 'التاريخ', ''].forEach(function (h) { var d = document.createElement('div'); d.textContent = h; head.appendChild(d); });
+    list.appendChild(head);
+    items.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'item';
+      var no = document.createElement('div'); no.className = 'no'; no.textContent = '#' + (r.no || '—');
+      var who = document.createElement('div'); who.className = 'who';
+      var b = document.createElement('b'); b.textContent = r.payee || 'بدون اسم';
+      var sm = document.createElement('small');
+      var months = (r.rows || []).filter(function (x) { return x.a; }).map(function (x) { return MONTHS[x.m] + ' ' + x.y; });
+      sm.textContent = [r.reason, months.join('، ')].filter(Boolean).join(' · ');
+      who.appendChild(b); who.appendChild(sm);
+      var amt = document.createElement('div'); amt.className = 'amt'; amt.textContent = fmt(r.total || 0, r.currency || 'LBP');
+      var dt = document.createElement('div'); dt.className = 'dt'; dt.textContent = dmy(r.date);
+      var act = document.createElement('div'); act.className = 'act';
+      var open = document.createElement('button'); open.type = 'button'; open.className = 'small'; open.textContent = 'فتح';
+      open.addEventListener('click', function () { openReceipt(r.id); });
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'small danger';
+      del.textContent = pendingDelete === r.id ? 'تأكيد الحذف' : 'حذف';
+      del.addEventListener('click', function () {
+        if (pendingDelete === r.id) { pendingDelete = null; deleteReceipt(r.id); }
+        else { pendingDelete = r.id; renderArchive(); }
+      });
+      act.appendChild(open); act.appendChild(del);
+      [no, who, amt, dt, act].forEach(function (c) { row.appendChild(c); });
+      list.appendChild(row);
+    });
+  }
+
+  function showView(v) {
+    var edit = v === 'edit';
+    $('viewEdit').hidden = !edit; $('viewArchive').hidden = edit; $('editActions').hidden = !edit;
+    $('tabEdit').setAttribute('aria-selected', String(edit));
+    $('tabArchive').setAttribute('aria-selected', String(!edit));
+    if (!edit) { pendingDelete = null; renderArchive(); }
+    else window.dispatchEvent(new Event('resize')); // re-measure signature pads
+  }
+  $('tabEdit').addEventListener('click', function () { showView('edit'); });
+  $('tabArchive').addEventListener('click', function () { showView('archive'); });
+  $('search').addEventListener('input', renderArchive);
+  $('btnSave').addEventListener('click', saveReceipt);
+
+  // Prefer the account's database (works across devices); fall back to this browser.
+  archive = localLoad(); sortArchive();
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('db').then(function (db) {
+      if (!db) return;
+      dbCol = db.collection('receipts');
+      text($('where'), 'محفوظ في حسابك، ويظهر على كل أجهزتك');
+      archive = []; renderArchive();
+      dbCol.orderBy('savedAt', 'desc').limit(1000).onSnapshot(function (snap) {
+        archive = snap.docs.map(function (d) { var o = JSON.parse(JSON.stringify(d.data())); o.id = d.id; return o; });
+        if (currentId) setEditing(currentId);
+        renderArchive();
+      }, function () {
+        dbCol = null; archive = localLoad(); sortArchive();
+        text($('where'), 'محفوظ على هذا الجهاز فقط'); renderArchive();
+      });
+    }, function () {});
+  }
+
   /* ---------- Boot ---------- */
   var s = load();
   if (s.org) $('org').value = s.org;
@@ -558,6 +782,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
   }
   if (s.adminSig && $('keepAdmin').checked) padAdmin.drawImage(s.adminSig);
   render();
+  renderArchive();
 })();
 </script>
 <!-- END-PAGE -->
