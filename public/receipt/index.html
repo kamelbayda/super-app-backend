@@ -154,7 +154,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
 .empty { padding: 32px 16px; text-align: center; color: var(--muted); line-height: 1.8; }
 @media (max-width: 700px) {
   .item.head { display: none; }
-  .item { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; }
+  .item { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; grid-auto-flow: row dense; }
   .item .amt { grid-column: 2; }
   .item .dt { grid-column: 1; }
   .item .act { grid-column: 2; }
