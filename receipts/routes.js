@@ -12,10 +12,11 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCIES = ['LBP', 'USD'];
+const FONTS = ['kufi', 'naskh', 'sans'];
 
 const str = (v, max) => (v == null ? '' : String(v)).trim().slice(0, max);
 
-// The list view never needs the signature images, which make up most of a receipt's size.
+// The list view never needs the signature and logo images, which make up most of a receipt's size.
 function toSummary(row) {
   const d = row.data || {};
   return {
@@ -48,7 +49,7 @@ function clean(body) {
   }));
   const total = Math.round(rows.reduce((s, r) => s + r.a, 0) * 100) / 100;
   if (!(total > 0) || total >= 1e16) return null;
-  const sig = (v) => (typeof v === 'string' && v.startsWith('data:image/') && v.length < 600000 ? v : null);
+  const image = (v) => (typeof v === 'string' && v.startsWith('data:image/') && v.length < 600000 ? v : null);
   return {
     no: str(body.no, 40),
     org: str(body.org, 200),
@@ -60,8 +61,10 @@ function clean(body) {
     adminName: str(body.adminName, 200),
     rows,
     total,
-    adminSig: sig(body.adminSig),
-    empSig: sig(body.empSig),
+    adminSig: image(body.adminSig),
+    empSig: image(body.empSig),
+    logo: image(body.logo),
+    font: FONTS.includes(body.font) ? body.font : 'kufi',
   };
 }
 
@@ -86,7 +89,7 @@ function createReceiptsRouter({ pool, apiKey }) {
   router.get('/', wrap(async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, receipt_no, payee, total, currency, updated_at, created_at,
-              data - 'adminSig' - 'empSig' AS data
+              data - 'adminSig' - 'empSig' - 'logo' AS data
          FROM receipts ORDER BY updated_at DESC LIMIT 1000`
     );
     res.json({ ok: true, receipts: rows.map(toSummary) });

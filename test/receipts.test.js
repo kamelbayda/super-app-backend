@@ -29,7 +29,7 @@ test('receipts API', { skip: !DB && 'TEST_DATABASE_URL not set' }, async (t) => 
     payee: 'أحمد محمد', reason: 'راتب شهري', adminName: '',
     rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29' }],
     total: 1, // ignored: the server recomputes it
-    adminSig: SIG, empSig: SIG,
+    adminSig: SIG, empSig: SIG, logo: SIG, font: 'naskh',
   };
 
   await t.test('requires the receipts key', async () => {
@@ -58,6 +58,7 @@ test('receipts API', { skip: !DB && 'TEST_DATABASE_URL not set' }, async (t) => 
     assert.equal(r.status, 200);
     assert.deepEqual(r.body.receipts.map((x) => x.id), ['r2', 'r1']);
     assert.equal(r.body.receipts[0].adminSig, undefined);
+    assert.equal(r.body.receipts[0].logo, undefined);
     assert.equal(r.body.receipts[1].reason, 'راتب شهري');
   });
 
@@ -65,6 +66,8 @@ test('receipts API', { skip: !DB && 'TEST_DATABASE_URL not set' }, async (t) => 
     const r = await call('GET', '/r1');
     assert.equal(r.status, 200);
     assert.equal(r.body.receipt.empSig, SIG);
+    assert.equal(r.body.receipt.logo, SIG);
+    assert.equal(r.body.receipt.font, 'naskh');
     assert.equal(r.body.receipt.org, 'مدرسة القلمون للصبيان');
   });
 
