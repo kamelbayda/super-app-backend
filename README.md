@@ -10,7 +10,18 @@ cp .env.example .env   # fill in DATABASE_URL, LICENSE_PRIVATE_KEY, ADMIN_API_KE
 npm start
 ```
 
-The `licenses` table is created automatically on start.
+The `licenses` and `receipts` tables are created automatically on start.
+
+## Receipts (إيصال قبض)
+
+A receipt maker is served at **`/receipt`**: organisation name, amounts in figures and Arabic
+words, admin and employee signatures, print, and an archive of saved receipts.
+
+- Set **`RECEIPTS_API_KEY`** in Railway to a long random string. It is the archive's password:
+  the page asks for it once per device. Without it the archive API answers `503` and the page
+  keeps receipts in the browser only.
+- API (header `x-receipts-key`): `GET /api/receipts` (list, no signatures),
+  `GET /api/receipts/:id`, `PUT /api/receipts/:id` (create or replace), `DELETE /api/receipts/:id`.
 
 ## POS licensing
 

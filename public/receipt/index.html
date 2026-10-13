@@ -151,6 +151,10 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
 .item .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
 .item .dt { font-variant-numeric: tabular-nums; color: var(--muted); }
 .item .act { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.lock { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 8px; max-width: 460px; }
+.lock-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.lock-row input { flex: 1 1 200px; }
+.err { color: var(--danger); margin: 0; font-size: .9rem; }
 .empty { padding: 32px 16px; text-align: center; color: var(--muted); line-height: 1.8; }
 @media (max-width: 700px) {
   .item.head { display: none; }
@@ -314,6 +318,15 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
     <input id="search" type="search" placeholder="ابحث بالاسم أو رقم الإيصال">
     <span class="where" id="where">محفوظ على هذا الجهاز فقط</span>
   </div>
+  <form class="lock" id="lockForm" hidden>
+    <strong>الأرشيف محميّ بكلمة سر</strong>
+    <p class="hint">أدخل كلمة سر الأرشيف مرة واحدة على هذا الجهاز.</p>
+    <div class="lock-row">
+      <input id="lockKey" type="password" autocomplete="current-password" placeholder="كلمة السر" required>
+      <button type="submit" class="primary">فتح الأرشيف</button>
+    </div>
+    <p class="err" id="lockErr" hidden></p>
+  </form>
   <div class="list" id="list"></div>
 </section>
 
@@ -638,22 +651,61 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
     return Math.max(max, cur) + 1;
   }
 
+  /* Storage: the server's database when the page is served by it, the artifact's
+     database inside claude.ai, otherwise this browser's local storage. */
+  var mode = 'local';            // 'local' | 'db' | 'server' | 'locked'
+  var serverKey = '';
+  try { serverKey = localStorage.getItem('receipt-server-key') || ''; } catch (e) {}
+
+  function api(method, path, body) {
+    return fetch('/api/receipts' + path, {
+      method: method,
+      headers: body ? { 'content-type': 'application/json', 'x-receipts-key': serverKey } : { 'x-receipts-key': serverKey },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (j) {
+        if (res.ok) return j;
+        if (res.status === 401) lock();
+        var err = new Error(j.error || 'http_' + res.status); err.code = j.error || 'http_' + res.status; err.status = res.status;
+        throw err;
+      });
+    });
+  }
+  function loadServerList() {
+    return api('GET', '/').then(function (j) {
+      mode = 'server'; archive = j.receipts || []; sortArchive();
+      $('lockForm').hidden = true; $('list').hidden = false;
+      text($('where'), 'محفوظ على السيرفر، ويظهر على كل أجهزتك');
+      if (currentId) setEditing(currentId);
+      renderArchive();
+    });
+  }
+  function lock() {
+    mode = 'locked'; archive = [];
+    $('lockForm').hidden = false; $('list').hidden = true;
+    text($('where'), 'الأرشيف على السيرفر');
+    renderArchive();
+  }
+
   function saveReceipt() {
     var st = getState();
     if (!st.total) { toast('أدخل مبلغ دفعة واحدة على الأقل قبل الحفظ.'); return; }
+    if (mode === 'locked') { showView('archive'); toast('أدخل كلمة سر الأرشيف أولاً.'); $('lockKey').focus(); return; }
     var id = currentId || uid();
     var existing = archive.filter(function (r) { return r.id === id; })[0];
     st.id = id;
     st.createdAt = existing ? existing.createdAt : new Date().toISOString();
     st.savedAt = new Date().toISOString();
     var btn = $('btnSave'); btn.disabled = true;
-    var done = function () {
-      archive = archive.filter(function (r) { return r.id !== id; }); archive.push(st); sortArchive();
+    var done = function (saved) {
+      archive = archive.filter(function (r) { return r.id !== id; }); archive.push(saved || st); sortArchive();
       setEditing(id); renderArchive();
       toast(existing ? 'حُفظت التعديلات' : 'حُفظ الإيصال رقم ' + (st.no || '—') + ' في الأرشيف');
     };
     var p;
-    if (dbCol) {
+    if (mode === 'server') {
+      p = api('PUT', '/' + id, st).then(function (j) { return j.receipt; });
+    } else if (mode === 'db') {
       var body = JSON.parse(JSON.stringify(st)); delete body.id;
       p = dbCol.doc(id).set(body);
     } else {
@@ -666,28 +718,33 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
     }
     p.then(done, function (e) {
       var code = e && e.code;
-      toast(code === 'quota_exceeded' || (e && e.name === 'QuotaExceededError')
-        ? 'الأرشيف ممتلئ. احذف بعض الإيصالات القديمة ثم احفظ مجدداً.'
+      toast(code === 'unauthorized' ? 'كلمة سر الأرشيف غير صحيحة. أدخلها من جديد في الأرشيف.'
+        : code === 'quota_exceeded' || (e && e.name === 'QuotaExceededError') ? 'الأرشيف ممتلئ. احذف بعض الإيصالات القديمة ثم احفظ مجدداً.'
         : code === 'invalid_argument' ? 'لا تملك صلاحية الحفظ في هذا الأرشيف.'
-        : 'تعذّر الحفظ. حاول مرة أخرى.');
+        : code === 'bad_receipt' ? 'بيانات الإيصال غير مكتملة. تحقق من المبالغ.'
+        : 'تعذّر الحفظ. تحقق من الاتصال وحاول مرة أخرى.');
     }).then(function () { btn.disabled = false; });
   }
 
   function deleteReceipt(id) {
-    var p = dbCol ? dbCol.doc(id).delete() : new Promise(function (ok) {
-      archive = archive.filter(function (r) { return r.id !== id; }); localWrite(); ok();
-    });
+    var p = mode === 'server' ? api('DELETE', '/' + id)
+      : mode === 'db' ? dbCol.doc(id).delete()
+      : new Promise(function (ok) { archive = archive.filter(function (r) { return r.id !== id; }); localWrite(); ok(); });
     p.then(function () {
       archive = archive.filter(function (r) { return r.id !== id; });
       if (currentId === id) setEditing(null);
       renderArchive(); toast('حُذف الإيصال');
-    }, function () { toast('تعذّر الحذف. حاول مرة أخرى.'); });
+    }, function (e) { if (!(e && e.code === 'unauthorized')) toast('تعذّر الحذف. حاول مرة أخرى.'); });
   }
 
   function openReceipt(id) {
     var item = archive.filter(function (r) { return r.id === id; })[0]; if (!item) return;
-    showView('edit');
-    setState(item); setEditing(id);
+    // The server's list leaves out the signatures; fetch the whole receipt
+    var p = mode === 'server' ? api('GET', '/' + id).then(function (j) { return j.receipt; }) : Promise.resolve(item);
+    p.then(function (full) {
+      showView('edit');
+      setState(full); setEditing(id);
+    }, function (e) { if (!(e && e.code === 'unauthorized')) toast('تعذّر فتح الإيصال. حاول مرة أخرى.'); });
   }
 
   var pendingDelete = null;
@@ -745,12 +802,25 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
   $('search').addEventListener('input', renderArchive);
   $('btnSave').addEventListener('click', saveReceipt);
 
-  // Prefer the account's database (works across devices); fall back to this browser.
+  $('lockForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    serverKey = $('lockKey').value.trim();
+    $('lockErr').hidden = true;
+    loadServerList().then(function () {
+      try { localStorage.setItem('receipt-server-key', serverKey); } catch (err) {}
+      $('lockKey').value = '';
+      toast('تم فتح الأرشيف');
+    }, function (err) {
+      $('lockErr').hidden = false;
+      text($('lockErr'), err && err.status === 401 ? 'كلمة السر غير صحيحة.' : 'تعذّر الاتصال بالسيرفر. حاول مرة أخرى.');
+    });
+  });
+
   archive = localLoad(); sortArchive();
   if (window.claude && typeof window.claude.use === 'function') {
     window.claude.use('db').then(function (db) {
       if (!db) return;
-      dbCol = db.collection('receipts');
+      mode = 'db'; dbCol = db.collection('receipts');
       text($('where'), 'محفوظ في حسابك، ويظهر على كل أجهزتك');
       archive = []; renderArchive();
       dbCol.orderBy('savedAt', 'desc').limit(1000).onSnapshot(function (snap) {
@@ -758,10 +828,16 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-s
         if (currentId) setEditing(currentId);
         renderArchive();
       }, function () {
-        dbCol = null; archive = localLoad(); sortArchive();
+        mode = 'local'; dbCol = null; archive = localLoad(); sortArchive();
         text($('where'), 'محفوظ على هذا الجهاز فقط'); renderArchive();
       });
     }, function () {});
+  } else if (/^https?:$/.test(location.protocol)) {
+    // Served by our backend: use its database when the archive API is set up
+    loadServerList().catch(function (e) {
+      if (e && e.status === 401) return; // lock() already asked for the password
+      if (e && e.code === 'not_configured') text($('where'), 'أرشيف السيرفر غير مفعّل بعد. الإيصالات محفوظة على هذا الجهاز فقط.');
+    });
   }
 
   /* ---------- Boot ---------- */
