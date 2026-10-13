@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- BEGIN-PAGE -->
+<title>إيصال قبض</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Noto+Naskh+Arabic:wght@400;600;700&display=swap">
+<style>
+/* Layout: editing form beside a live, printable sheet of receipt paper */
+:root {
+  --desk: #e9edf1;
+  --panel: #ffffff;
+  --paper: #fffdf8;
+  --ink: #1b2533;
+  --muted: #5d6b7c;
+  --line: #ccd4dd;
+  --rule: #1b2533;
+  --accent: #1f5f8b;
+  --accent-ink: #ffffff;
+  --stamp: #2c4f9e;
+  --danger: #a33a32;
+  --font-doc: "Noto Naskh Arabic", "Traditional Arabic", "Times New Roman", serif;
+  --font-ui: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desk: #141a21; --panel: #1c242e; --muted: #9aa8b8; --line: #34404d;
+    --accent: #6fb0e0; --accent-ink: #0d1a26; --danger: #e48a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desk: #141a21; --panel: #1c242e; --muted: #9aa8b8; --line: #34404d;
+  --accent: #6fb0e0; --accent-ink: #0d1a26; --danger: #e48a80; color-scheme: dark;
+}
+/* The receipt itself always stays ink-on-paper, in both themes */
+.receipt { --ink: #1b2533; --muted: #5d6b7c; --rule: #1b2533; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  padding-inline: 16px;
+  padding-block: 20px 40px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body { color: #e6ecf2; } }
+:root[data-theme="dark"] body { color: #e6ecf2; }
+
+.app { max-width: 1240px; margin-inline: auto; display: grid; gap: 20px; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 960px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+header.top { max-width: 1240px; margin: 0 auto 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+header.top h1 { font-family: var(--font-doc); font-size: 1.6rem; margin: 0; }
+header.top p { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+button, .btn {
+  font: inherit; font-weight: 500; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: inherit;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.ghost { background: transparent; }
+button.small { padding: 4px 10px; font-size: .85rem; }
+button.danger { color: var(--danger); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 18px; }
+fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+legend { font-weight: 600; font-size: .8rem; letter-spacing: .02em; color: var(--muted); padding: 0 0 6px; }
+label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
+input, select, textarea {
+  font: inherit; color: inherit; background: var(--desk); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+input.num { font-variant-numeric: tabular-nums; direction: ltr; text-align: right; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.payrow { display: grid; grid-template-columns: 0.8fr 1.2fr 1.4fr; gap: 6px; align-items: end; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.payrow:last-child { border-bottom: 0; }
+.payrow label { font-size: .75rem; }
+.payrow input, .payrow select { padding: 6px 8px; }
+.payrow .d-wrap { grid-column: 1 / 3; }
+.payrow .del { justify-self: start; }
+.words-out { background: var(--desk); border-radius: 8px; padding: 10px; font-family: var(--font-doc); font-size: 1rem; line-height: 1.7; color: inherit; }
+
+.sig { display: grid; gap: 6px; }
+.sig canvas { width: 100%; height: 130px; background: #fff; border: 1px solid var(--line); border-radius: 8px; touch-action: none; cursor: crosshair; display: block; }
+.sig .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.sig .bar span { font-size: .85rem; color: var(--muted); }
+.check { display: flex; align-items: center; gap: 8px; color: inherit; font-size: .85rem; }
+.check input { width: auto; }
+.hint { font-size: .8rem; color: var(--muted); margin: 0; }
+
+/* ---------- The receipt sheet ---------- */
+.stage { overflow-x: auto; min-width: 0; }
+.receipt {
+  background: var(--paper); color: var(--ink);
+  width: 100%; max-width: 820px; margin-inline: auto;
+  padding: 36px 40px 32px;
+  font-family: var(--font-doc);
+  box-shadow: 0 1px 2px rgba(20,30,45,.08), 0 10px 30px rgba(20,30,45,.12);
+  border-radius: 2px;
+  min-width: 600px;
+}
+.r-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 16px; }
+.r-org { font-weight: 700; font-size: 1.05rem; line-height: 1.5; }
+.r-no { font-family: var(--font-ui); font-size: .85rem; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.r-title { font-size: 2.4rem; font-weight: 700; margin: 0; line-height: 1.2; text-align: center; }
+.r-place { text-align: left; font-weight: 600; font-size: 1.05rem; }
+.r-body { margin-top: 26px; font-size: 1.15rem; line-height: 2.2; }
+.fill { display: inline-block; min-width: 180px; border-bottom: 1px dotted var(--rule); padding: 0 6px; font-weight: 700; text-align: center; line-height: 1.6; }
+table.r-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 1.1rem; }
+.r-table th, .r-table td { border: 1.5px solid var(--rule); padding: 6px 10px; text-align: center; }
+.r-table th { font-weight: 700; }
+.r-table td { font-variant-numeric: tabular-nums; height: 2.2em; }
+.r-table tr.total td { font-weight: 700; font-size: 1.2rem; }
+.r-words { margin-top: 14px; font-weight: 700; font-size: 1.2rem; line-height: 1.8; }
+.r-sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 26px; }
+.r-sig { text-align: center; }
+.r-sig .lbl { font-weight: 700; font-size: 1.1rem; }
+.r-sig .name { font-size: .95rem; color: var(--muted); min-height: 1.5em; }
+.r-sig .box { height: 96px; display: flex; align-items: center; justify-content: center; border-bottom: 1px dotted var(--rule); margin-top: 6px; }
+.r-sig img { max-height: 92px; max-width: 100%; }
+.r-note { margin-top: 18px; font-size: .95rem; color: var(--muted); }
+
+/* Image export overlay */
+.overlay { position: fixed; inset: 0; background: rgba(10,14,20,.7); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.overlay .card { background: var(--panel); border-radius: 12px; padding: 16px; max-width: 900px; width: 100%; max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
+.overlay img { width: 100%; border: 1px solid var(--line); }
+.toast { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); inset-inline-start: 50%; transform: translateX(50%); background: var(--ink); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: .9rem; z-index: 20; }
+
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #fff; padding: 0; }
+  header.top, .panel, .overlay, .toast { display: none !important; }
+  .app { display: block; }
+  .stage { overflow: visible; }
+  .receipt { box-shadow: none; max-width: none; min-width: 0; padding: 0; background: #fff; }
+}
+@media (prefers-reduced-motion: no-preference) { button { transition: filter .15s; } button:hover { filter: brightness(.95); } }
+</style>
+<!-- END-HEAD -->
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>إيصال قبض</h1>
+    <p>عبّئ البيانات، وقّع، ثم اطبع الإيصال أو احفظه كصورة.</p>
+  </div>
+  <div class="actions">
+    <button type="button" id="btnNew" class="ghost">إيصال جديد</button>
+    <button type="button" id="btnImage">حفظ كصورة</button>
+    <button type="button" id="btnPrint" class="primary" hidden>طباعة</button>
+  </div>
+</header>
+
+<main class="app">
+  <form class="panel" id="form" autocomplete="off">
+    <fieldset>
+      <legend>المؤسسة</legend>
+      <label>اسم المؤسسة
+        <input id="org" value="مدرسة القلمون للصبيان">
+      </label>
+      <div class="row2">
+        <label>المدينة
+          <input id="city" value="القلمون">
+        </label>
+        <label>رقم الإيصال
+          <input id="no" class="num" inputmode="numeric" value="1">
+        </label>
+      </div>
+      <div class="row2">
+        <label>تاريخ الإيصال
+          <input id="date" type="date">
+        </label>
+        <label>العملة
+          <select id="currency">
+            <option value="LBP">ليرة لبنانية (ل.ل.)</option>
+            <option value="USD">دولار أميركي ($)</option>
+          </select>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>المستلم</legend>
+      <label>أنا الموقع أدناه (اسم الموظف)
+        <input id="payee" value="" placeholder="مثال: أحمد محمد">
+      </label>
+      <label>عن (اختياري)
+        <input id="reason" value="" placeholder="مثال: راتب شهري">
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>الدفعات</legend>
+      <div id="rows"></div>
+      <div><button type="button" class="small" id="addRow">+ إضافة دفعة</button></div>
+      <div class="words-out" id="wordsOut" aria-live="polite"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>التواقيع</legend>
+      <div class="sig">
+        <div class="bar"><span>ختم وتوقيع الإدارة</span>
+          <span class="actions">
+            <label class="btn small" for="adminFile" style="font-size:.85rem;padding:4px 10px">رفع صورة الختم</label>
+            <button type="button" class="small danger" data-clear="admin">مسح</button>
+          </span>
+        </div>
+        <input type="file" id="adminFile" accept="image/*" hidden>
+        <canvas id="padAdmin" aria-label="مساحة توقيع الإدارة"></canvas>
+        <label class="check"><input type="checkbox" id="keepAdmin" checked> احتفظ بتوقيع الإدارة للإيصالات القادمة</label>
+      </div>
+      <label>اسم المسؤول في الإدارة (اختياري)
+        <input id="adminName" value="">
+      </label>
+      <div class="sig">
+        <div class="bar"><span>توقيع الموظف</span>
+          <button type="button" class="small danger" data-clear="emp">مسح</button>
+        </div>
+        <canvas id="padEmp" aria-label="مساحة توقيع الموظف"></canvas>
+      </div>
+      <p class="hint">وقّع بإصبعك أو بالقلم داخل المربع.</p>
+    </fieldset>
+  </form>
+
+  <section class="stage" aria-label="معاينة الإيصال">
+    <article class="receipt" id="receipt">
+      <div class="r-head">
+        <div>
+          <div class="r-org" id="rOrg"></div>
+          <div class="r-no">رقم: <span id="rNo"></span></div>
+        </div>
+        <h2 class="r-title">إيصال قبض</h2>
+        <div class="r-place" id="rPlace"></div>
+      </div>
+
+      <div class="r-body">
+        أنا الموقع أدناه <span class="fill" id="rPayee">&nbsp;</span>
+        تقاضيت من إدارة <b id="rOrg2"></b> مبلغاً وقدره
+        <span class="fill"><bdi id="rFigs"></bdi></span><span id="rReason"></span>
+      </div>
+
+      <table class="r-table">
+        <thead><tr><th>العام</th><th>الشهر</th><th>الدفعة</th><th>تاريخ تقاضي الدفعة</th></tr></thead>
+        <tbody id="rRows"></tbody>
+        <tfoot><tr class="total"><td colspan="2">المجموع</td><td colspan="2" id="rTotal"></td></tr></tfoot>
+      </table>
+
+      <div class="r-words" id="rWords"></div>
+
+      <div class="r-sigs">
+        <div class="r-sig">
+          <div class="lbl">ختم وتوقيع الإدارة</div>
+          <div class="box" id="rSigAdmin"></div>
+          <div class="name" id="rAdminName"></div>
+        </div>
+        <div class="r-sig">
+          <div class="lbl">توقيع الموظف</div>
+          <div class="box" id="rSigEmp"></div>
+          <div class="name" id="rEmpName"></div>
+        </div>
+      </div>
+    </article>
+  </section>
+</main>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="card">
+    <div class="bar" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong>صورة الإيصال</strong>
+      <span class="actions">
+        <a class="btn" id="dl" download="receipt.png" hidden>تنزيل</a>
+        <button type="button" id="closeOverlay">إغلاق</button>
+      </span>
+    </div>
+    <p class="hint" id="imgHint">اضغط مطولاً على الصورة واختر «حفظ الصورة» أو «مشاركة».</p>
+    <img id="outImg" alt="صورة الإيصال">
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- Arabic number words ---------- */
+  var ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
+  var TEENS = ['عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+  var TENS = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+  var HUNDREDS = ['', 'مئة', 'مئتان', 'ثلاثمئة', 'أربعمئة', 'خمسمئة', 'ستمئة', 'سبعمئة', 'ثمانمئة', 'تسعمئة'];
+  // [singular, dual, plural (3-10)]
+  var SCALES = [null, ['ألف', 'ألفان', 'آلاف'], ['مليون', 'مليونان', 'ملايين'], ['مليار', 'ملياران', 'مليارات']];
+
+  function below100(n) {
+    if (n < 10) return ONES[n];
+    if (n < 20) return TEENS[n - 10];
+    var o = n % 10, t = TENS[Math.floor(n / 10)];
+    return o ? ONES[o] + ' و' + t : t;
+  }
+  function below1000(n) {
+    var parts = [];
+    var h = Math.floor(n / 100), r = n % 100;
+    if (h) parts.push(HUNDREDS[h]);
+    if (r) parts.push(below100(r));
+    return parts.join(' و');
+  }
+  function group(c, scale) {
+    if (!scale) return below1000(c);
+    if (c === 1) return scale[0];
+    if (c === 2) return scale[1];
+    var r = c % 100;
+    var word = (r >= 3 && r <= 10) ? scale[2] : scale[0];
+    return below1000(c).replace(/مئتان$/, 'مئتا') + ' ' + word;
+  }
+  function intToWords(n) {
+    if (n === 0) return 'صفر';
+    var groups = [], i = 0;
+    while (n > 0 && i < SCALES.length) {
+      var c = n % 1000;
+      if (c) groups.unshift(group(c, SCALES[i]));
+      n = Math.floor(n / 1000); i++;
+    }
+    return groups.join(' و');
+  }
+
+  var CURRENCIES = {
+    LBP: { word: 'ليرة لبنانية', sym: 'ل.ل.', decimals: 0 },
+    USD: { word: 'دولار أميركي', sym: '$', decimals: 2, sub: 'سنتاً' }
+  };
+
+  function amountToWords(amount, code) {
+    var cur = CURRENCIES[code];
+    var whole = Math.floor(amount + 1e-9);
+    var frac = cur.decimals ? Math.round((amount - whole) * 100) : 0;
+    var s = intToWords(whole) + ' ' + cur.word;
+    if (frac) s += ' و' + intToWords(frac) + ' ' + cur.sub;
+    return s + ' فقط لا غير';
+  }
+
+  function fmt(n, code) {
+    var cur = CURRENCIES[code];
+    var s = n.toLocaleString('en-US', { minimumFractionDigits: cur.decimals && n % 1 ? 2 : 0, maximumFractionDigits: cur.decimals });
+    return code === 'USD' ? '$' + s : s + ' ' + cur.sym;
+  }
+  function parseAmount(v) {
+    var n = parseFloat(String(v).replace(/[,\s٬]/g, '').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }));
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /* ---------- Storage (best effort) ---------- */
+  var KEY = 'receipt-app-v1';
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
+  function save(patch) {
+    try { var s = load(); for (var k in patch) s[k] = patch[k]; localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  }
+
+  /* ---------- Helpers ---------- */
+  var $ = function (id) { return document.getElementById(id); };
+  var MONTHS = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
+  function todayISO() { var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+  function dmy(iso) { if (!iso) return ''; var p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function text(el, s) { el.textContent = s; }
+  function toast(msg) { var t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { t.hidden = true; }, 2200); }
+
+  /* ---------- Payment rows ---------- */
+  var rowsEl = $('rows');
+  var rowSeq = 0;
+  function addRow(data) {
+    data = data || {};
+    var id = ++rowSeq;
+    var now = new Date();
+    var wrap = document.createElement('div');
+    wrap.className = 'payrow';
+    var monthOpts = MONTHS.map(function (m, i) { return '<option value="' + i + '">' + m + '</option>'; }).join('');
+    wrap.innerHTML =
+      '<label>العام<input class="num y" id="y' + id + '" inputmode="numeric"></label>' +
+      '<label>الشهر<select class="m" id="m' + id + '">' + monthOpts + '</select></label>' +
+      '<label>المبلغ<input class="num a" id="a' + id + '" inputmode="decimal" placeholder="0"></label>' +
+      '<label class="d-wrap">تاريخ التقاضي<input class="d" id="d' + id + '" type="date"></label>' +
+      '<button type="button" class="small danger del" aria-label="حذف الدفعة">حذف</button>';
+    wrap.querySelector('.y').value = data.y || now.getFullYear();
+    wrap.querySelector('.m').value = data.m != null ? data.m : now.getMonth();
+    wrap.querySelector('.a').value = data.a || '';
+    wrap.querySelector('.d').value = data.d || $('date').value || todayISO();
+    wrap.querySelector('.del').addEventListener('click', function () {
+      if (rowsEl.children.length > 1) { wrap.remove(); render(); }
+      else { wrap.querySelector('.a').value = ''; render(); }
+    });
+    var a = wrap.querySelector('.a');
+    a.addEventListener('blur', function () { var n = parseAmount(a.value); a.value = n ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''; });
+    rowsEl.appendChild(wrap);
+  }
+  function readRows() {
+    return Array.prototype.map.call(rowsEl.children, function (r) {
+      return { y: r.querySelector('.y').value.trim(), m: +r.querySelector('.m').value, a: parseAmount(r.querySelector('.a').value), d: r.querySelector('.d').value };
+    });
+  }
+
+  /* ---------- Signature pads ---------- */
+  function Pad(canvas) {
+    var ctx = canvas.getContext('2d'), drawing = false, last = null, self = this;
+    this.dirty = false; this.image = null;
+    function size() {
+      var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      if (!r.width) return;
+      var keep = self.dirty ? canvas.toDataURL() : null;
+      canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#13264a'; ctx.lineWidth = 2.4;
+      if (keep) self.drawImage(keep, false);
+    }
+    function pos(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener('pointerdown', function (e) { drawing = true; last = pos(e); canvas.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.arc(last.x, last.y, 1.1, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); self.dirty = true; e.preventDefault(); });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!drawing) return;
+      var p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault();
+    });
+    function end() { if (!drawing) return; drawing = false; self.onchange && self.onchange(); }
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    this.clear = function () { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore(); self.dirty = false; self.onchange && self.onchange(); };
+    this.drawImage = function (src, notify) {
+      var img = new Image();
+      img.onload = function () {
+        var r = canvas.getBoundingClientRect(), w = r.width, h = r.height;
+        var k = Math.min(w / img.width, h / img.height);
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore();
+        ctx.drawImage(img, (w - img.width * k) / 2, (h - img.height * k) / 2, img.width * k, img.height * k);
+        self.dirty = true; if (notify !== false && self.onchange) self.onchange();
+      };
+      img.src = src;
+    };
+    this.toData = function () { return self.dirty ? canvas.toDataURL('image/png') : null; };
+    size();
+    window.addEventListener('resize', size);
+  }
+
+  var padAdmin = new Pad($('padAdmin'));
+  var padEmp = new Pad($('padEmp'));
+
+  function setSig(box, data) {
+    box.textContent = '';
+    if (data) { var img = new Image(); img.src = data; img.alt = ''; box.appendChild(img); }
+  }
+  padAdmin.onchange = function () {
+    var d = padAdmin.toData(); setSig($('rSigAdmin'), d);
+    if ($('keepAdmin').checked) save({ adminSig: d });
+  };
+  padEmp.onchange = function () { setSig($('rSigEmp'), padEmp.toData()); };
+  document.querySelectorAll('[data-clear]').forEach(function (b) {
+    b.addEventListener('click', function () { (b.getAttribute('data-clear') === 'admin' ? padAdmin : padEmp).clear(); });
+  });
+  $('adminFile').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    var rd = new FileReader(); rd.onload = function () { padAdmin.drawImage(rd.result); }; rd.readAsDataURL(f);
+    e.target.value = '';
+  });
+  $('keepAdmin').addEventListener('change', function () {
+    save({ keepAdmin: this.checked, adminSig: this.checked ? padAdmin.toData() : null });
+  });
+
+  /* ---------- Render ---------- */
+  function render() {
+    var code = $('currency').value;
+    var org = $('org').value.trim() || '—';
+    var rows = readRows();
+    var total = rows.reduce(function (s, r) { return s + r.a; }, 0);
+
+    text($('rOrg'), org); text($('rOrg2'), org);
+    text($('rNo'), $('no').value.trim());
+    text($('rPlace'), ($('city').value.trim() ? $('city').value.trim() + ' في ' : '') + dmy($('date').value));
+    $('rPayee').innerHTML = '&nbsp;'; if ($('payee').value.trim()) text($('rPayee'), $('payee').value.trim());
+    text($('rEmpName'), $('payee').value.trim());
+    text($('rAdminName'), $('adminName').value.trim());
+    text($('rFigs'), fmt(total, code));
+    text($('rReason'), $('reason').value.trim() ? '، وذلك عن ' + $('reason').value.trim() + '.' : '');
+
+    var tb = $('rRows'); tb.textContent = '';
+    var shown = rows.slice();
+    while (shown.length < 3) shown.push(null); // keep the empty ruled lines like the paper form
+    shown.forEach(function (r) {
+      var tr = document.createElement('tr');
+      var cells = r ? [r.y, MONTHS[r.m], r.a ? fmt(r.a, code) : '', dmy(r.d)] : ['', '', '', ''];
+      cells.forEach(function (c) { var td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    text($('rTotal'), fmt(total, code));
+    var words = total ? amountToWords(total, code) : '';
+    text($('rWords'), words);
+    text($('wordsOut'), words ? 'بالأحرف: ' + words : 'أدخل المبلغ ليظهر بالأحرف هنا.');
+
+    save({ org: $('org').value, city: $('city').value, currency: code, adminName: $('adminName').value, no: $('no').value });
+  }
+  $('form').addEventListener('input', render);
+  $('form').addEventListener('change', render);
+  $('form').addEventListener('submit', function (e) { e.preventDefault(); });
+  $('addRow').addEventListener('click', function () { addRow(); render(); });
+
+  /* ---------- Actions ---------- */
+  var inFrame = (function () { try { return window.self !== window.top; } catch (e) { return true; } })();
+  if (!inFrame) {
+    $('btnPrint').hidden = false;
+    $('btnPrint').addEventListener('click', function () { window.print(); });
+  }
+
+  $('btnNew').addEventListener('click', function () {
+    var n = parseInt($('no').value, 10);
+    $('no').value = isFinite(n) ? n + 1 : 1;
+    $('payee').value = ''; $('reason').value = '';
+    $('date').value = todayISO();
+    rowsEl.textContent = ''; addRow();
+    padEmp.clear();
+    render();
+    toast('إيصال جديد رقم ' + $('no').value);
+  });
+
+  $('btnImage').addEventListener('click', function () {
+    if (!window.html2canvas) { toast('تعذّر تحميل أداة الصور. تحقق من الاتصال بالإنترنت.'); return; }
+    var btn = this; btn.disabled = true;
+    var el = $('receipt');
+    html2canvas(el, { scale: 2, backgroundColor: '#fffdf8', windowWidth: Math.max(1000, el.scrollWidth + 80) }).then(function (canvas) {
+      var url = canvas.toDataURL('image/png');
+      $('outImg').src = url;
+      var dl = $('dl');
+      dl.hidden = inFrame;
+      dl.href = url; dl.download = 'receipt-' + ($('no').value || '1') + '.png';
+      $('overlay').hidden = false;
+    }).catch(function () { toast('تعذّر إنشاء الصورة. حاول مرة أخرى.'); })
+      .then(function () { btn.disabled = false; });
+  });
+  $('closeOverlay').addEventListener('click', function () { $('overlay').hidden = true; });
+  $('overlay').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
+
+  /* ---------- Boot ---------- */
+  var s = load();
+  if (s.org) $('org').value = s.org;
+  if (s.city != null) $('city').value = s.city;
+  if (s.currency) $('currency').value = s.currency;
+  if (s.adminName) $('adminName').value = s.adminName;
+  if (s.no) $('no').value = s.no;
+  if (s.keepAdmin === false) $('keepAdmin').checked = false;
+  $('date').value = todayISO();
+  if (s.org || s.no) {
+    addRow();
+  } else {
+    // First visit: an example filled from the paper receipt
+    $('date').value = '2026-01-29';
+    addRow({ y: 2025, m: 11, a: '32,000,000', d: '2026-01-29' });
+  }
+  if (s.adminSig && $('keepAdmin').checked) padAdmin.drawImage(s.adminSig);
+  render();
+})();
+</script>
+<!-- END-PAGE -->
+</body>
+</html>

@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { createLicenseRouter, createAdminRouter } = require('./licensing/routes');
@@ -11,6 +12,9 @@ function createApp({ pool, redis, licensePrivateKey, adminApiKey }) {
   app.set('trust proxy', 1); // Railway sits behind a proxy; needed for per-IP rate limiting
   app.use(cors());
   app.use(express.json({ limit: '100kb' }));
+
+  // صفحة إنشاء إيصالات القبض
+  app.use('/receipt', express.static(path.join(__dirname, 'public', 'receipt')));
 
   // نقطة اختبار للسيرفر
   app.get('/api/health', async (req, res) => {
