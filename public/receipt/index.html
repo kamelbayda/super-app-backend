@@ -185,14 +185,44 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
 .overlay img { width: 100%; border: 1px solid var(--line); }
 .toast { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); inset-inline-start: 50%; transform: translateX(50%); background: var(--ink); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: .9rem; z-index: 20; }
 
+/* ---------- A4 print sheet: original on top, copy below, cut line between ---------- */
+.r-copy { display: none; }
+.print-sheet { position: fixed; left: -10000px; top: 0; width: 210mm; height: 296mm; padding: 8mm 10mm; background: #fff; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+.print-sheet .copy { height: calc((296mm - 16mm - 9mm) / 2); overflow: hidden; }
+.print-sheet .cut { height: 9mm; display: flex; align-items: center; gap: 3mm; color: #8a94a0; font: 8pt var(--font-ui); flex: none; }
+.print-sheet .cut::before, .print-sheet .cut::after { content: ""; flex: 1; border-top: 1px dashed #8a94a0; }
+.print-sheet .receipt { box-shadow: none; min-width: 0; max-width: none; width: 100%; padding: 0; background: #fff; font-size: 9.5pt; transform-origin: top center; }
+.print-sheet .receipt[data-font="naskh"] { font-size: 10.5pt; }
+.print-sheet .frame { padding: 4mm 5mm 3mm; }
+.print-sheet .r-head { padding-bottom: 2.5mm; gap: 4mm; }
+.print-sheet .r-logo { width: 15mm; height: 15mm; }
+.print-sheet .r-org { font-size: 12pt; }
+.print-sheet .r-title { font-size: 16pt; }
+.print-sheet .r-copy { display: inline-block; margin-top: 1.5mm; border: 1px solid var(--rule); padding: .3mm 3mm; font-size: 8pt; font-weight: 700; }
+.print-sheet .r-meta { margin-top: 2.5mm; }
+.print-sheet .r-meta > div { padding: 1mm 3mm; }
+.print-sheet .r-fields { margin-top: 2.5mm; gap: 1mm; }
+.print-sheet .r-field { grid-template-columns: 32mm minmax(0, 1fr); font-size: 1em; }
+.print-sheet .r-field .v { min-height: 1.6em; line-height: 1.6; }
+.print-sheet .r-field .v.amount { font-size: 11pt; padding: 0 4mm; }
+.print-sheet table.r-table { margin-top: 2.5mm; font-size: 9pt; }
+.print-sheet .r-table th, .print-sheet .r-table td { padding: .8mm 2mm; height: auto; }
+.print-sheet .r-table tr.filler { display: none; }
+.print-sheet .r-table tr.total td { font-size: 10pt; }
+.print-sheet .r-sigs { margin-top: 3mm; gap: 12mm; }
+.print-sheet .r-sig .lbl { font-size: 9pt; }
+.print-sheet .r-sig .box { height: 15mm; margin-top: 1mm; }
+.print-sheet .r-sig img { max-height: 14mm; }
+.print-sheet .r-sig .name { font-size: 8pt; min-height: 1.2em; }
+.print-sheet, .print-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
 @media print {
-  @page { size: A4; margin: 12mm; }
-  body { background: #fff; padding: 0; }
-  header.top, .panel, .overlay, .toast, .archive { display: none !important; }
-  .app { display: block; }
-  .stage { overflow: visible; }
-  .receipt { box-shadow: none; max-width: none; min-width: 0; padding: 0; background: #fff; }
-  .receipt, .r-table th, .r-table tr.total td, .r-field .v.amount, .r-field .v.words { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4 portrait; margin: 0; }
+  html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+  :root { padding: 0 !important; }
+  body > *:not(.print-sheet) { display: none !important; }
+  .print-sheet { position: static; left: auto; }
+}
 }
 @media (prefers-reduced-motion: no-preference) { button { transition: filter .15s; } button:hover { filter: brightness(.95); } }
 </style>
@@ -213,7 +243,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
     <button type="button" id="btnNew" class="ghost">إيصال جديد</button>
     <button type="button" id="btnSave">حفظ في الأرشيف</button>
     <button type="button" id="btnImage">حفظ كصورة</button>
-    <button type="button" id="btnPrint" class="primary" hidden>طباعة</button>
+    <button type="button" id="btnPrint" class="primary">طباعة A4</button>
   </div>
 </header>
 
@@ -315,6 +345,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
         <div class="r-titlebox">
           <h2 class="r-title">إيصال قبض</h2>
           <div class="r-sub">RECEIPT</div>
+          <div class="r-copy"></div>
         </div>
       </div>
 
@@ -386,8 +417,10 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
   </div>
 </div>
 <div class="toast" id="toast" hidden></div>
+<div class="print-sheet" id="printSheet" aria-hidden="true"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 (function () {
   'use strict';
@@ -626,6 +659,7 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
     while (shown.length < 3) shown.push(null); // keep the empty ruled lines like the paper form
     shown.forEach(function (r) {
       var tr = document.createElement('tr');
+      if (!r) tr.className = 'filler';
       var cells = r ? [r.y, MONTHS[r.m], r.a ? fmt(r.a, code) : '', dmy(r.d)] : ['', '', '', ''];
       cells.forEach(function (c) { var td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
       tb.appendChild(tr);
@@ -644,9 +678,60 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
 
   /* ---------- Actions ---------- */
   var inFrame = (function () { try { return window.self !== window.top; } catch (e) { return true; } })();
-  if (!inFrame) {
-    $('btnPrint').hidden = false;
-    $('btnPrint').addEventListener('click', function () { window.print(); });
+
+  // Two copies of the current receipt on one A4 sheet
+  function buildSheet() {
+    var sheet = $('printSheet'); sheet.textContent = '';
+    [['النسخة الأصلية', 'ORIGINAL'], ['نسخة', 'COPY']].forEach(function (lbl, i) {
+      if (i) { var cut = document.createElement('div'); cut.className = 'cut'; cut.textContent = '✂ قص هنا'; sheet.appendChild(cut); }
+      var box = document.createElement('div'); box.className = 'copy';
+      var c = $('receipt').cloneNode(true);
+      c.removeAttribute('id');
+      Array.prototype.forEach.call(c.querySelectorAll('[id]'), function (e) { e.removeAttribute('id'); });
+      c.querySelector('.r-copy').textContent = lbl[0] + ' · ' + lbl[1];
+      box.appendChild(c); sheet.appendChild(box);
+    });
+    // Shrink a copy that would not fit its half of the page (many payment rows)
+    Array.prototype.forEach.call(sheet.querySelectorAll('.copy'), function (box) {
+      var r = box.firstChild, k = box.clientHeight / r.scrollHeight;
+      if (k < 1) r.style.transform = 'scale(' + k.toFixed(3) + ')';
+    });
+    return sheet;
+  }
+  window.addEventListener('beforeprint', buildSheet);
+
+  function sheetPDF() {
+    var sheet = buildSheet();
+    return (document.fonts ? document.fonts.ready : Promise.resolve()).then(function () {
+      return html2canvas(sheet, { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 });
+    }).then(function (canvas) {
+      var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 296);
+      return { blob: pdf.output('blob'), image: canvas.toDataURL('image/png') };
+    });
+  }
+
+  if (inFrame) {
+    // Inside claude.ai the page cannot open the print dialog: hand over an A4 PDF to print instead
+    text($('btnPrint'), 'PDF للطباعة (A4)');
+    $('btnPrint').addEventListener('click', function () {
+      if (!window.html2canvas || !window.jspdf) { toast('تعذّر تحميل أداة PDF. تحقق من الاتصال بالإنترنت.'); return; }
+      var btn = this; btn.disabled = true;
+      var name = 'إيصال-' + ($('no').value || '1') + '.pdf';
+      sheetPDF().then(function (out) {
+        var use = window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null);
+        return use.then(function (dl) {
+          if (dl) return dl.save({ filename: name, data: out.blob }).catch(function (e) {
+            if (e && e.code !== 'declined') toast('تعذّر حفظ الملف. حاول مرة أخرى.');
+          });
+          // No file saving here: show the sheet as an image to save and print
+          $('outImg').src = out.image; $('dl').hidden = true; $('overlay').hidden = false;
+        });
+      }).catch(function () { toast('تعذّر إنشاء ملف PDF. حاول مرة أخرى.'); })
+        .then(function () { btn.disabled = false; });
+    });
+  } else {
+    $('btnPrint').addEventListener('click', function () { buildSheet(); window.print(); });
   }
 
   $('btnNew').addEventListener('click', function () {
