@@ -1000,8 +1000,9 @@ table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-s
         text($('where'), 'محفوظ على هذا الجهاز فقط'); renderArchive();
       });
     }, function () {});
-  } else if (/^https?:$/.test(location.protocol)) {
-    // Served by our backend: use its database when the archive API is set up
+  } else if (/^https?:$/.test(location.protocol) && !/\.github\.io$/.test(location.hostname)) {
+    // Served by our backend: use its database when the archive API is set up.
+    // GitHub Pages has no backend, so there the archive stays in the browser.
     loadServerList().catch(function (e) {
       if (e && e.status === 401) return; // lock() already asked for the password
       if (e && e.code === 'not_configured') text($('where'), 'أرشيف السيرفر غير مفعّل بعد. الإيصالات محفوظة على هذا الجهاز فقط.');
