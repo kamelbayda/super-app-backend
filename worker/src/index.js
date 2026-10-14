@@ -8,6 +8,7 @@
  *   GET  /api/licenses/public-key -> base64 SPKI for VITE_LICENSE_PUBLIC_KEY
  *   /api/admin/licenses...        (header x-admin-key = ADMIN_API_KEY secret)
  *   GET  /admin                   browser admin page (works from a phone/tablet)
+ *   GET  /receipt                 receipt maker; its archive is /api/receipts (see receipts.js)
  *
  * Subscriptions (self-service sign-up, approved by the admin):
  *   GET  /api/plans               business types, periods, prices and payment instructions
@@ -33,6 +34,7 @@
  * device, invoices used, licensed or not), so the admin page lists who is trying the program.
  */
 import { ADMIN_PAGE } from './admin-page.js';
+import { RECEIPT_PAGE, receipts } from './receipts.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const YEAR_MS = 365 * DAY_MS;
@@ -598,6 +600,10 @@ export default {
       const reqStatus = path.match(/^\/api\/requests\/([A-Za-z0-9_-]+)$/);
       if (reqStatus && request.method === 'GET') return await requestStatus(env, reqStatus[1], url.searchParams.get('secret') || '');
       if (path.startsWith('/api/admin/')) return await admin(request, env, path);
+      if (path === '/api/receipts' || path.startsWith('/api/receipts/')) return await receipts(request, env, path);
+      if (path === '/receipt') {
+        return new Response(RECEIPT_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      }
       if (path === '/admin' || path === '/') {
         return new Response(ADMIN_PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
       }

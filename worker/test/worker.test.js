@@ -332,3 +332,59 @@ test('licence API on Workers', async (t) => {
     assert.match(html, /إدارة تراخيص/);
   });
 });
+
+test('receipts on Workers', async (t) => {
+  // No RECEIPTS_API_KEY in this run, so the archive takes the admin key
+  const call = async (method, path, body, key = ADMIN) => {
+    const headers = { 'content-type': 'application/json' };
+    if (key) headers['x-receipts-key'] = key;
+    const res = await fetch(BASE + '/api/receipts' + path, { method, headers, body: body && JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  const SIG = 'data:image/png;base64,iVBORw0KGgo=';
+  const receipt = {
+    no: '1', org: 'مدرسة القلمون للصبيان', city: 'القلمون', date: '2026-01-29', currency: 'LBP',
+    payee: 'أحمد محمد', reason: 'راتب شهري', rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29' }],
+    total: 1, adminSig: SIG, empSig: SIG, logo: SIG, font: 'naskh',
+  };
+
+  await t.test('serves the receipt page', async () => {
+    const res = await fetch(`${BASE}/receipt/`);
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /إيصال قبض/);
+  });
+
+  await t.test('requires the key', async () => {
+    assert.equal((await call('GET', '', null, null)).status, 401);
+    assert.equal((await call('GET', '', null, 'wrong')).status, 401);
+  });
+
+  await t.test('creates, lists, reads, updates and deletes', async () => {
+    const created = await call('PUT', '/r1', receipt);
+    assert.equal(created.status, 201);
+    assert.equal(created.body.receipt.total, 32000000);
+    assert.equal((await call('PUT', '/r2', { ...receipt, no: '2', payee: 'خالد' })).status, 201);
+
+    const list = await call('GET', '');
+    assert.deepEqual(list.body.receipts.map((r) => r.id).sort(), ['r1', 'r2']);
+    assert.equal(list.body.receipts[0].empSig, undefined);
+    assert.equal(list.body.receipts[0].logo, undefined);
+
+    const full = await call('GET', '/r1');
+    assert.equal(full.body.receipt.empSig, SIG);
+    assert.equal(full.body.receipt.logo, SIG);
+    assert.equal(full.body.receipt.font, 'naskh');
+
+    assert.equal((await call('PUT', '/r1', { ...receipt, payee: 'أحمد علي' })).status, 200);
+    assert.equal((await call('GET', '/r1')).body.receipt.payee, 'أحمد علي');
+
+    assert.equal((await call('DELETE', '/r2')).status, 200);
+    assert.equal((await call('DELETE', '/r2')).status, 404);
+  });
+
+  await t.test('rejects bad input', async () => {
+    assert.equal((await call('PUT', '/r9', { ...receipt, rows: [] })).status, 400);
+    assert.equal((await call('PUT', '/bad%20id', receipt)).status, 400);
+    assert.equal((await call('GET', '/missing')).status, 404);
+  });
+});

@@ -5,6 +5,12 @@ name = "pos-licensing"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# The receipt page (../public/receipt/index.html) is bundled as text and served at /receipt
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "pos-licensing"

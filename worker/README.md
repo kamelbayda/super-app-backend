@@ -28,6 +28,19 @@ It has the same API as the Express version in `../licensing`, so the POS app and
 
 كل ما ينعمل merge على `main`، Cloudflare بيعيد النشر لحاله.
 
+## صفحة إيصالات القبض
+
+نفس الـ Worker بينشر صفحة الإيصالات على:
+**`https://pos-licensing.<اسم-حسابك>.workers.dev/receipt`**
+
+- بتشتغل لأي حدا معو الرابط، من الكمبيوتر أو التلفون أو الـ iPad، بلا أي حساب.
+- **أرشيف الإيصالات** محفوظ بقاعدة D1 تبع الـ Worker، ومحمي بكلمة سر:
+  - إذا ما عملت شي، كلمة سر الأرشيف هي نفسها **مفتاح الإدارة** `ADMIN_API_KEY`.
+  - إذا بدك كلمة سر لحالها للموظفين (حتى ما ياخدوا مفتاح الإدارة)، زيد Secret اسمو `RECEIPTS_API_KEY`
+    بنفس المحل اللي حطّيت فيه `ADMIN_API_KEY`، وزيد على الـ Deploy command:
+    ` && printf '%s' "$RECEIPTS_API_KEY" | npx wrangler secret put RECEIPTS_API_KEY`
+- الطباعة بتطلع على ورقة A4 وحدة فيها النسخة الأصلية والنسخة (COPY).
+
 ## الاستعمال اليومي
 من صفحة `/admin` (بتشتغل على الموبايل والـ iPad):
 - **إنشاء مفتاح:** سنوي أو مدى الحياة لزبون.
@@ -45,6 +58,8 @@ It has the same API as the Express version in `../licensing`, so the POS app and
 | `GET /api/licenses/public-key` | public, gives the value for `VITE_LICENSE_PUBLIC_KEY` |
 | `GET/POST /api/admin/licenses` (`{ plan, note?, count?, maxDevices? }`), `POST /api/admin/licenses/:key/revoke`, `POST /api/admin/licenses/:key/reset-device`, `POST /api/admin/licenses/:key/devices` `{ maxDevices }` | `x-admin-key` |
 | `GET /admin` | admin page (asks for the key) |
+| `GET /receipt` | receipt maker (public page) |
+| `GET /api/receipts`, `GET/PUT/DELETE /api/receipts/:id` | `x-receipts-key` (`RECEIPTS_API_KEY`, or `ADMIN_API_KEY` when unset) |
 
 The ECDSA P-256 signing key pair is created on first use and kept in D1. Licences are
 `base64url(JSON) + "." + base64url(r||s)`, the same format as the Express version.

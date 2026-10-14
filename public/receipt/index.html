@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- BEGIN-PAGE -->
+<title>إيصال قبض</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700&family=Amiri:wght@400;700&display=swap">
+<style>
+/* Layout: editing form beside a live, printable sheet of receipt paper */
+:root {
+  --desk: #e9edf1;
+  --panel: #ffffff;
+  --paper: #fffdf8;
+  --ink: #1b2533;
+  --muted: #5d6b7c;
+  --line: #ccd4dd;
+  --rule: #1b2533;
+  --accent: #1f5f8b;
+  --accent-ink: #ffffff;
+  --stamp: #2c4f9e;
+  --danger: #a33a32;
+  --font-doc: "Noto Kufi Arabic", "Segoe UI", Tahoma, sans-serif;
+  --font-title: "Noto Kufi Arabic", "Segoe UI", Tahoma, sans-serif;
+  --font-ui: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --desk: #141a21; --panel: #1c242e; --muted: #9aa8b8; --line: #34404d;
+    --accent: #6fb0e0; --accent-ink: #0d1a26; --danger: #e48a80; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --desk: #141a21; --panel: #1c242e; --muted: #9aa8b8; --line: #34404d;
+  --accent: #6fb0e0; --accent-ink: #0d1a26; --danger: #e48a80; color-scheme: dark;
+}
+/* The receipt itself always stays ink-on-paper, in both themes */
+.receipt { --ink: #14202e; --muted: #5a6675; --rule: #14202e; --band: #eef1f4; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--desk);
+  direction: rtl;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  padding-inline: 16px;
+  padding-block: 20px 40px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body { color: #e6ecf2; } }
+:root[data-theme="dark"] body { color: #e6ecf2; }
+
+.app { max-width: 1240px; margin-inline: auto; display: grid; gap: 20px; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); align-items: start; }
+@media (max-width: 960px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+header.top { max-width: 1240px; margin: 0 auto 16px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+header.top h1 { font-family: var(--font-title); font-size: 1.6rem; margin: 0; }
+header.top p { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+button, .btn {
+  font: inherit; font-weight: 500; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: inherit;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.ghost { background: transparent; }
+button.small { padding: 4px 10px; font-size: .85rem; }
+button.danger { color: var(--danger); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 18px; }
+fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; min-width: 0; }
+legend { font-weight: 600; font-size: .8rem; letter-spacing: .02em; color: var(--muted); padding: 0 0 6px; }
+label { display: grid; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
+input, select, textarea {
+  font: inherit; color: inherit; background: var(--desk); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0;
+}
+input.num { font-variant-numeric: tabular-nums; direction: ltr; text-align: right; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.payrow { display: grid; grid-template-columns: 0.8fr 1.2fr 1.4fr; gap: 6px; align-items: end; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.payrow:last-child { border-bottom: 0; }
+.payrow label { font-size: .75rem; }
+.payrow input, .payrow select { padding: 6px 8px; }
+.payrow .d-wrap { grid-column: 1 / 3; }
+.payrow .del { justify-self: start; }
+.words-out { background: var(--desk); border-radius: 8px; padding: 10px; font-family: var(--font-doc); font-size: 1rem; line-height: 1.7; color: inherit; }
+
+.sig { display: grid; gap: 6px; }
+.sig canvas { width: 100%; height: 130px; background: #fff; border: 1px solid var(--line); border-radius: 8px; touch-action: none; cursor: crosshair; display: block; }
+.sig .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.sig .bar span { font-size: .85rem; color: var(--muted); }
+.check { display: flex; align-items: center; gap: 8px; color: inherit; font-size: .85rem; }
+.check input { width: auto; }
+.hint { font-size: .8rem; color: var(--muted); margin: 0; }
+
+/* ---------- The receipt sheet: a framed, bank-style form ---------- */
+.stage { overflow-x: auto; min-width: 0; }
+.receipt {
+  background: var(--paper); color: var(--ink);
+  width: 100%; max-width: 820px; margin-inline: auto; min-width: 600px;
+  padding: 14px;
+  font-family: var(--font-doc);
+  box-shadow: 0 1px 2px rgba(20,30,45,.08), 0 10px 30px rgba(20,30,45,.12);
+  border-radius: 2px;
+}
+.receipt[data-font="naskh"] { --font-doc: "Amiri", "Traditional Arabic", "Times New Roman", serif; font-size: 1.08em; }
+.receipt[data-font="sans"] { --font-doc: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif; }
+.frame { border: 3px double var(--rule); padding: 22px 26px 20px; }
+.r-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; padding-bottom: 16px; border-bottom: 2px solid var(--rule); }
+.r-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.r-logo { width: 78px; height: 78px; object-fit: contain; flex: none; }
+.r-org { font-weight: 700; font-size: 1.2rem; line-height: 1.5; overflow-wrap: anywhere; }
+.r-city { font-size: .9rem; color: var(--muted); }
+.r-titlebox { text-align: center; }
+.r-title { font-size: 1.9rem; font-weight: 700; margin: 0; line-height: 1.3; letter-spacing: 0; }
+.r-sub { font-family: var(--font-ui); font-size: .72rem; letter-spacing: .3em; color: var(--muted); direction: ltr; }
+.r-meta { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); margin-top: 14px; }
+.r-meta > div { padding: 6px 12px; border-inline-start: 1px solid var(--rule); }
+.r-meta > div:first-child { border-inline-start: 0; }
+.r-meta .k { display: block; font-size: .75rem; color: var(--muted); }
+.r-meta .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.r-fields { margin-top: 16px; display: grid; gap: 10px; }
+.r-field { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: end; font-size: 1.02rem; }
+.r-field .k { font-weight: 600; white-space: nowrap; }
+.r-field .v { border-bottom: 1px dotted var(--rule); min-height: 1.9em; padding: 0 6px; font-weight: 700; line-height: 1.8; overflow-wrap: anywhere; }
+.r-field .v.amount { justify-self: start; border: 1.5px solid var(--rule); background: var(--band); padding: 2px 16px; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.r-field .v.words { background: var(--band); border-bottom: 1.5px solid var(--rule); }
+table.r-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 1rem; }
+.r-table th, .r-table td { border: 1px solid var(--rule); padding: 6px 10px; text-align: center; }
+.r-table th { font-weight: 700; background: var(--band); font-size: .92rem; }
+.r-table td { font-variant-numeric: tabular-nums; height: 2.2em; }
+.r-table tr.total td { font-weight: 700; font-size: 1.1rem; background: var(--band); }
+.r-sigs { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 22px; }
+.r-sig { text-align: center; }
+.r-sig .lbl { font-weight: 700; font-size: .98rem; }
+.r-sig .name { font-size: .9rem; color: var(--muted); min-height: 1.5em; }
+.r-sig .box { height: 92px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid var(--rule); margin-top: 6px; }
+.r-sig img { max-height: 88px; max-width: 100%; }
+.logo-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.logo-pick img { width: 48px; height: 48px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 6px; }
+
+/* Tabs and archive */
+.tabs { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.tabs button { border: 0; background: transparent; padding: 6px 14px; border-radius: 7px; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.count { font-variant-numeric: tabular-nums; opacity: .8; }
+.editing { font-size: .85rem; color: var(--muted); }
+.archive { max-width: 1240px; margin-inline: auto; display: grid; gap: 14px; }
+.archive .tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.archive .tools input { max-width: 340px; background: var(--panel); }
+.archive .where { font-size: .85rem; color: var(--muted); }
+.list { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.item { display: grid; grid-template-columns: 70px minmax(0, 1.6fr) minmax(0, 1fr) 110px auto; gap: 12px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.item.head { font-size: .8rem; color: var(--muted); font-weight: 600; padding-block: 8px; }
+.item .no { font-variant-numeric: tabular-nums; font-weight: 600; }
+.item .who { min-width: 0; }
+.item .who b { display: block; overflow-wrap: anywhere; }
+.item .who small { color: var(--muted); overflow-wrap: anywhere; }
+.item .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.item .dt { font-variant-numeric: tabular-nums; color: var(--muted); }
+.item .act { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.lock { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: grid; gap: 8px; max-width: 460px; }
+.lock-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.lock-row input { flex: 1 1 200px; }
+.err { color: var(--danger); margin: 0; font-size: .9rem; }
+.empty { padding: 32px 16px; text-align: center; color: var(--muted); line-height: 1.8; }
+@media (max-width: 700px) {
+  .item.head { display: none; }
+  .item { grid-template-columns: auto minmax(0, 1fr); row-gap: 4px; grid-auto-flow: row dense; }
+  .item .amt { grid-column: 2; }
+  .item .dt { grid-column: 1; }
+  .item .act { grid-column: 2; }
+}
+
+/* Image export overlay */
+.overlay { position: fixed; inset: 0; background: rgba(10,14,20,.7); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.overlay .card { background: var(--panel); border-radius: 12px; padding: 16px; max-width: 900px; width: 100%; max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
+.overlay img { width: 100%; border: 1px solid var(--line); }
+.toast { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); inset-inline-start: 50%; transform: translateX(50%); background: var(--ink); color: #fff; padding: 8px 16px; border-radius: 8px; font-size: .9rem; z-index: 20; }
+
+/* ---------- A4 print sheet: original on top, copy below, cut line between ---------- */
+.r-copy { display: none; }
+.print-sheet { position: fixed; left: -10000px; top: 0; width: 210mm; height: 296mm; padding: 8mm 10mm; background: #fff; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+.print-sheet .copy { height: calc((296mm - 16mm - 9mm) / 2); overflow: hidden; }
+.print-sheet .cut { height: 9mm; display: flex; align-items: center; gap: 3mm; color: #8a94a0; font: 8pt var(--font-ui); flex: none; }
+.print-sheet .cut::before, .print-sheet .cut::after { content: ""; flex: 1; border-top: 1px dashed #8a94a0; }
+.print-sheet .receipt { box-shadow: none; min-width: 0; max-width: none; width: 100%; padding: 0; background: #fff; font-size: 9.5pt; transform-origin: top center; }
+.print-sheet .receipt[data-font="naskh"] { font-size: 10.5pt; }
+.print-sheet .frame { padding: 4mm 5mm 3mm; }
+.print-sheet .r-head { padding-bottom: 2.5mm; gap: 4mm; }
+.print-sheet .r-logo { width: 15mm; height: 15mm; }
+.print-sheet .r-org { font-size: 12pt; }
+.print-sheet .r-title { font-size: 16pt; }
+.print-sheet .r-copy { display: inline-block; margin-top: 1.5mm; border: 1px solid var(--rule); padding: .3mm 3mm; font-size: 8pt; font-weight: 700; }
+.print-sheet .r-meta { margin-top: 2.5mm; }
+.print-sheet .r-meta > div { padding: 1mm 3mm; }
+.print-sheet .r-fields { margin-top: 2.5mm; gap: 1mm; }
+.print-sheet .r-field { grid-template-columns: 32mm minmax(0, 1fr); font-size: 1em; }
+.print-sheet .r-field .v { min-height: 1.6em; line-height: 1.6; }
+.print-sheet .r-field .v.amount { font-size: 11pt; padding: 0 4mm; }
+.print-sheet table.r-table { margin-top: 2.5mm; font-size: 9pt; }
+.print-sheet .r-table th, .print-sheet .r-table td { padding: .8mm 2mm; height: auto; }
+.print-sheet .r-table tr.filler { display: none; }
+.print-sheet .r-table tr.total td { font-size: 10pt; }
+.print-sheet .r-sigs { margin-top: 3mm; gap: 12mm; }
+.print-sheet .r-sig .lbl { font-size: 9pt; }
+.print-sheet .r-sig .box { height: 15mm; margin-top: 1mm; }
+.print-sheet .r-sig img { max-height: 14mm; }
+.print-sheet .r-sig .name { font-size: 8pt; min-height: 1.2em; }
+.print-sheet, .print-sheet * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+@media print {
+  @page { size: A4 portrait; margin: 0; }
+  html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+  :root { padding: 0 !important; }
+  body > *:not(.print-sheet) { display: none !important; }
+  .print-sheet { position: static; left: auto; }
+}
+}
+@media (prefers-reduced-motion: no-preference) { button { transition: filter .15s; } button:hover { filter: brightness(.95); } }
+</style>
+<!-- END-HEAD -->
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>إيصال قبض</h1>
+    <p>عبّئ البيانات، وقّع، ثم احفظ الإيصال في الأرشيف أو اطبعه.</p>
+  </div>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tabEdit" aria-selected="true">الإيصال</button>
+    <button type="button" role="tab" id="tabArchive" aria-selected="false">الأرشيف <span class="count" id="archCount"></span></button>
+  </div>
+  <div class="actions" id="editActions">
+    <span class="editing" id="editing" hidden></span>
+    <button type="button" id="btnNew" class="ghost">إيصال جديد</button>
+    <button type="button" id="btnSave">حفظ في الأرشيف</button>
+    <button type="button" id="btnImage">حفظ كصورة</button>
+    <button type="button" id="btnPrint" class="primary">طباعة A4</button>
+  </div>
+</header>
+
+<main class="app" id="viewEdit">
+  <form class="panel" id="form" autocomplete="off">
+    <fieldset>
+      <legend>المؤسسة</legend>
+      <label>اسم المؤسسة
+        <input id="org" value="مدرسة القلمون للصبيان">
+      </label>
+      <div class="logo-pick">
+        <img id="logoThumb" alt="شعار المؤسسة" hidden>
+        <label class="btn small" for="logoFile" style="font-size:.85rem;padding:4px 10px">رفع شعار المؤسسة</label>
+        <button type="button" class="small danger" id="logoRemove" hidden>إزالة الشعار</button>
+        <input type="file" id="logoFile" accept="image/*" hidden>
+      </div>
+      <label>خط الإيصال
+        <select id="font">
+          <option value="kufi">رسمي (كوفي، مثل الإيصالات البنكية)</option>
+          <option value="naskh">رسمي كلاسيكي (نسخ)</option>
+          <option value="sans">حديث</option>
+        </select>
+      </label>
+      <div class="row2">
+        <label>المدينة
+          <input id="city" value="القلمون">
+        </label>
+        <label>رقم الإيصال
+          <input id="no" class="num" inputmode="numeric" value="1">
+        </label>
+      </div>
+      <div class="row2">
+        <label>تاريخ الإيصال
+          <input id="date" type="date">
+        </label>
+        <label>العملة
+          <select id="currency">
+            <option value="LBP">ليرة لبنانية (ل.ل.)</option>
+            <option value="USD">دولار أميركي ($)</option>
+          </select>
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>المستلم</legend>
+      <label>أنا الموقع أدناه (اسم الموظف)
+        <input id="payee" value="" placeholder="مثال: أحمد محمد">
+      </label>
+      <label>عن (اختياري)
+        <input id="reason" value="" placeholder="مثال: راتب شهري">
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>الدفعات</legend>
+      <div id="rows"></div>
+      <div><button type="button" class="small" id="addRow">+ إضافة دفعة</button></div>
+      <div class="words-out" id="wordsOut" aria-live="polite"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>التواقيع</legend>
+      <div class="sig">
+        <div class="bar"><span>ختم وتوقيع الإدارة</span>
+          <span class="actions">
+            <label class="btn small" for="adminFile" style="font-size:.85rem;padding:4px 10px">رفع صورة الختم</label>
+            <button type="button" class="small danger" data-clear="admin">مسح</button>
+          </span>
+        </div>
+        <input type="file" id="adminFile" accept="image/*" hidden>
+        <canvas id="padAdmin" aria-label="مساحة توقيع الإدارة"></canvas>
+        <label class="check"><input type="checkbox" id="keepAdmin" checked> احتفظ بتوقيع الإدارة للإيصالات القادمة</label>
+      </div>
+      <label>اسم المسؤول في الإدارة (اختياري)
+        <input id="adminName" value="">
+      </label>
+      <div class="sig">
+        <div class="bar"><span>توقيع الموظف</span>
+          <button type="button" class="small danger" data-clear="emp">مسح</button>
+        </div>
+        <canvas id="padEmp" aria-label="مساحة توقيع الموظف"></canvas>
+      </div>
+      <p class="hint">وقّع بإصبعك أو بالقلم داخل المربع.</p>
+    </fieldset>
+  </form>
+
+  <section class="stage" aria-label="معاينة الإيصال">
+    <article class="receipt" id="receipt">
+     <div class="frame">
+      <div class="r-head">
+        <div class="r-brand">
+          <img class="r-logo" id="rLogo" alt="" hidden>
+          <div>
+            <div class="r-org" id="rOrg"></div>
+            <div class="r-city" id="rCity"></div>
+          </div>
+        </div>
+        <div class="r-titlebox">
+          <h2 class="r-title">إيصال قبض</h2>
+          <div class="r-sub">RECEIPT</div>
+          <div class="r-copy"></div>
+        </div>
+      </div>
+
+      <div class="r-meta">
+        <div><span class="k">رقم الإيصال</span><span class="v" id="rNo"></span></div>
+        <div><span class="k">التاريخ</span><span class="v" id="rDate"></span></div>
+        <div><span class="k">العملة</span><span class="v" id="rCur"></span></div>
+      </div>
+
+      <div class="r-fields">
+        <div class="r-field"><span class="k">أنا الموقع أدناه</span><span class="v" id="rPayee"></span></div>
+        <div class="r-field"><span class="k">تقاضيت من إدارة</span><span class="v" id="rOrg2"></span></div>
+        <div class="r-field"><span class="k">مبلغاً وقدره بالأرقام</span><span class="v amount"><bdi id="rFigs"></bdi></span></div>
+        <div class="r-field"><span class="k">بالأحرف</span><span class="v words" id="rWords"></span></div>
+        <div class="r-field" id="rReasonRow"><span class="k">وذلك عن</span><span class="v" id="rReason"></span></div>
+      </div>
+
+      <table class="r-table">
+        <thead><tr><th>العام</th><th>الشهر</th><th>الدفعة</th><th>تاريخ تقاضي الدفعة</th></tr></thead>
+        <tbody id="rRows"></tbody>
+        <tfoot><tr class="total"><td colspan="2">المجموع</td><td colspan="2" id="rTotal"></td></tr></tfoot>
+      </table>
+
+      <div class="r-sigs">
+        <div class="r-sig">
+          <div class="lbl">ختم وتوقيع الإدارة</div>
+          <div class="box" id="rSigAdmin"></div>
+          <div class="name" id="rAdminName"></div>
+        </div>
+        <div class="r-sig">
+          <div class="lbl">توقيع الموظف</div>
+          <div class="box" id="rSigEmp"></div>
+          <div class="name" id="rEmpName"></div>
+        </div>
+      </div>
+     </div>
+    </article>
+  </section>
+</main>
+
+<section class="archive" id="viewArchive" hidden aria-label="أرشيف الإيصالات">
+  <div class="tools">
+    <input id="search" type="search" placeholder="ابحث بالاسم أو رقم الإيصال">
+    <span class="where" id="where">محفوظ على هذا الجهاز فقط</span>
+  </div>
+  <form class="lock" id="lockForm" hidden>
+    <strong>الأرشيف محميّ بكلمة سر</strong>
+    <p class="hint">أدخل كلمة سر الأرشيف مرة واحدة على هذا الجهاز.</p>
+    <div class="lock-row">
+      <input id="lockKey" type="password" autocomplete="current-password" placeholder="كلمة السر" required>
+      <button type="submit" class="primary">فتح الأرشيف</button>
+    </div>
+    <p class="err" id="lockErr" hidden></p>
+  </form>
+  <div class="list" id="list"></div>
+</section>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="card">
+    <div class="bar" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong>صورة الإيصال</strong>
+      <span class="actions">
+        <a class="btn" id="dl" download="receipt.png" hidden>تنزيل</a>
+        <button type="button" id="closeOverlay">إغلاق</button>
+      </span>
+    </div>
+    <p class="hint" id="imgHint">اضغط مطولاً على الصورة واختر «حفظ الصورة» أو «مشاركة».</p>
+    <img id="outImg" alt="صورة الإيصال">
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+<div class="print-sheet" id="printSheet" aria-hidden="true"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- Arabic number words ---------- */
+  var ONES = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
+  var TEENS = ['عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+  var TENS = ['', '', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+  var HUNDREDS = ['', 'مئة', 'مئتان', 'ثلاثمئة', 'أربعمئة', 'خمسمئة', 'ستمئة', 'سبعمئة', 'ثمانمئة', 'تسعمئة'];
+  // [singular, dual, plural (3-10)]
+  var SCALES = [null, ['ألف', 'ألفان', 'آلاف'], ['مليون', 'مليونان', 'ملايين'], ['مليار', 'ملياران', 'مليارات']];
+
+  function below100(n) {
+    if (n < 10) return ONES[n];
+    if (n < 20) return TEENS[n - 10];
+    var o = n % 10, t = TENS[Math.floor(n / 10)];
+    return o ? ONES[o] + ' و' + t : t;
+  }
+  function below1000(n) {
+    var parts = [];
+    var h = Math.floor(n / 100), r = n % 100;
+    if (h) parts.push(HUNDREDS[h]);
+    if (r) parts.push(below100(r));
+    return parts.join(' و');
+  }
+  function group(c, scale) {
+    if (!scale) return below1000(c);
+    if (c === 1) return scale[0];
+    if (c === 2) return scale[1];
+    var r = c % 100;
+    var word = (r >= 3 && r <= 10) ? scale[2] : scale[0];
+    return below1000(c).replace(/مئتان$/, 'مئتا') + ' ' + word;
+  }
+  function intToWords(n) {
+    if (n === 0) return 'صفر';
+    var groups = [], i = 0;
+    while (n > 0 && i < SCALES.length) {
+      var c = n % 1000;
+      if (c) groups.unshift(group(c, SCALES[i]));
+      n = Math.floor(n / 1000); i++;
+    }
+    return groups.join(' و');
+  }
+
+  var CURRENCIES = {
+    LBP: { word: 'ليرة لبنانية', sym: 'ل.ل.', decimals: 0 },
+    USD: { word: 'دولار أميركي', sym: '$', decimals: 2, sub: 'سنتاً' }
+  };
+
+  function amountToWords(amount, code) {
+    var cur = CURRENCIES[code];
+    var whole = Math.floor(amount + 1e-9);
+    var frac = cur.decimals ? Math.round((amount - whole) * 100) : 0;
+    var s = intToWords(whole) + ' ' + cur.word;
+    if (frac) s += ' و' + intToWords(frac) + ' ' + cur.sub;
+    return s + ' فقط لا غير';
+  }
+
+  function fmt(n, code) {
+    var cur = CURRENCIES[code];
+    var s = n.toLocaleString('en-US', { minimumFractionDigits: cur.decimals && n % 1 ? 2 : 0, maximumFractionDigits: cur.decimals });
+    return code === 'USD' ? '$' + s : s + ' ' + cur.sym;
+  }
+  function parseAmount(v) {
+    var n = parseFloat(String(v).replace(/[,\s٬]/g, '').replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }));
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /* ---------- Storage (best effort) ---------- */
+  var KEY = 'receipt-app-v1';
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } }
+  function save(patch) {
+    try { var s = load(); for (var k in patch) s[k] = patch[k]; localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
+  }
+
+  /* ---------- Helpers ---------- */
+  var $ = function (id) { return document.getElementById(id); };
+  var MONTHS = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
+  function todayISO() { var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+  function dmy(iso) { if (!iso) return ''; var p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function text(el, s) { el.textContent = s; }
+  function toast(msg) { var t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(function () { t.hidden = true; }, 2200); }
+
+  /* ---------- Payment rows ---------- */
+  var rowsEl = $('rows');
+  var rowSeq = 0;
+  function addRow(data) {
+    data = data || {};
+    var id = ++rowSeq;
+    var now = new Date();
+    var wrap = document.createElement('div');
+    wrap.className = 'payrow';
+    var monthOpts = MONTHS.map(function (m, i) { return '<option value="' + i + '">' + m + '</option>'; }).join('');
+    wrap.innerHTML =
+      '<label>العام<input class="num y" id="y' + id + '" inputmode="numeric"></label>' +
+      '<label>الشهر<select class="m" id="m' + id + '">' + monthOpts + '</select></label>' +
+      '<label>المبلغ<input class="num a" id="a' + id + '" inputmode="decimal" placeholder="0"></label>' +
+      '<label class="d-wrap">تاريخ التقاضي<input class="d" id="d' + id + '" type="date"></label>' +
+      '<button type="button" class="small danger del" aria-label="حذف الدفعة">حذف</button>';
+    wrap.querySelector('.y').value = data.y || now.getFullYear();
+    wrap.querySelector('.m').value = data.m != null ? data.m : now.getMonth();
+    wrap.querySelector('.a').value = data.a || '';
+    wrap.querySelector('.d').value = data.d || $('date').value || todayISO();
+    wrap.querySelector('.del').addEventListener('click', function () {
+      if (rowsEl.children.length > 1) { wrap.remove(); render(); }
+      else { wrap.querySelector('.a').value = ''; render(); }
+    });
+    var a = wrap.querySelector('.a');
+    a.addEventListener('blur', function () { var n = parseAmount(a.value); a.value = n ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''; });
+    rowsEl.appendChild(wrap);
+  }
+  function readRows() {
+    return Array.prototype.map.call(rowsEl.children, function (r) {
+      return { y: r.querySelector('.y').value.trim(), m: +r.querySelector('.m').value, a: parseAmount(r.querySelector('.a').value), d: r.querySelector('.d').value };
+    });
+  }
+
+  /* ---------- Signature pads ---------- */
+  function Pad(canvas) {
+    var ctx = canvas.getContext('2d'), drawing = false, last = null, self = this;
+    this.dirty = false; this.image = null;
+    function size() {
+      var r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      if (!r.width) return;
+      var keep = self.dirty ? canvas.toDataURL() : null;
+      canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#13264a'; ctx.lineWidth = 2.4;
+      if (keep) self.drawImage(keep, false);
+    }
+    function pos(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener('pointerdown', function (e) { drawing = true; last = pos(e); canvas.setPointerCapture(e.pointerId); ctx.beginPath(); ctx.arc(last.x, last.y, 1.1, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); self.dirty = true; e.preventDefault(); });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!drawing) return;
+      var p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault();
+    });
+    function end() { if (!drawing) return; drawing = false; self.onchange && self.onchange(); }
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    this.clear = function (notify) { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore(); self.dirty = false; if (notify !== false && self.onchange) self.onchange(); };
+    this.drawImage = function (src, notify) {
+      var img = new Image();
+      img.onload = function () {
+        var r = canvas.getBoundingClientRect(), w = r.width, h = r.height;
+        var k = Math.min(w / img.width, h / img.height);
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.restore();
+        ctx.drawImage(img, (w - img.width * k) / 2, (h - img.height * k) / 2, img.width * k, img.height * k);
+        self.dirty = true; if (notify !== false && self.onchange) self.onchange();
+      };
+      img.src = src;
+    };
+    this.toData = function () { return self.dirty ? canvas.toDataURL('image/png') : null; };
+    size();
+    window.addEventListener('resize', size);
+  }
+
+  var padAdmin = new Pad($('padAdmin'));
+  var padEmp = new Pad($('padEmp'));
+
+  function setSig(box, data) {
+    box.textContent = '';
+    if (data) { var img = new Image(); img.src = data; img.alt = ''; box.appendChild(img); }
+  }
+  padAdmin.onchange = function () {
+    var d = padAdmin.toData(); setSig($('rSigAdmin'), d);
+    if ($('keepAdmin').checked) save({ adminSig: d });
+  };
+  padEmp.onchange = function () { setSig($('rSigEmp'), padEmp.toData()); };
+  document.querySelectorAll('[data-clear]').forEach(function (b) {
+    b.addEventListener('click', function () { (b.getAttribute('data-clear') === 'admin' ? padAdmin : padEmp).clear(); });
+  });
+  $('adminFile').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    var rd = new FileReader(); rd.onload = function () { padAdmin.drawImage(rd.result); }; rd.readAsDataURL(f);
+    e.target.value = '';
+  });
+  $('keepAdmin').addEventListener('change', function () {
+    save({ keepAdmin: this.checked, adminSig: this.checked ? padAdmin.toData() : null });
+  });
+
+  /* ---------- Logo ---------- */
+  var logo = null;
+  // Shrink the logo so it stays light in storage and in every archived receipt
+  function readLogo(file, done) {
+    var rd = new FileReader();
+    rd.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, 320 / Math.max(img.width, img.height));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        done(c.toDataURL('image/png'));
+      };
+      img.onerror = function () { toast('تعذّر قراءة الصورة. جرّب ملف PNG أو JPG.'); };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  }
+  function setLogo(data, remember) {
+    logo = data || null;
+    if (remember) save({ logo: logo });
+    render();
+  }
+  $('logoFile').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0]; if (!f) return;
+    readLogo(f, function (d) { setLogo(d, true); });
+    e.target.value = '';
+  });
+  $('logoRemove').addEventListener('click', function () { setLogo(null, true); });
+
+  /* ---------- Render ---------- */
+  function render() {
+    var code = $('currency').value;
+    var org = $('org').value.trim() || '—';
+    var rows = readRows();
+    var total = rows.reduce(function (s, r) { return s + r.a; }, 0);
+
+    text($('rOrg'), org); text($('rOrg2'), org);
+    text($('rCity'), $('city').value.trim());
+    text($('rNo'), $('no').value.trim());
+    text($('rDate'), dmy($('date').value));
+    text($('rCur'), CURRENCIES[code].word);
+    text($('rPayee'), $('payee').value.trim());
+    $('receipt').setAttribute('data-font', $('font').value);
+    $('rLogo').hidden = !logo; if (logo) $('rLogo').src = logo;
+    $('logoThumb').hidden = !logo; if (logo) $('logoThumb').src = logo;
+    $('logoRemove').hidden = !logo;
+    text($('rEmpName'), $('payee').value.trim());
+    text($('rAdminName'), $('adminName').value.trim());
+    text($('rFigs'), fmt(total, code));
+    text($('rReason'), $('reason').value.trim());
+    $('rReasonRow').hidden = !$('reason').value.trim();
+
+    var tb = $('rRows'); tb.textContent = '';
+    var shown = rows.slice();
+    while (shown.length < 3) shown.push(null); // keep the empty ruled lines like the paper form
+    shown.forEach(function (r) {
+      var tr = document.createElement('tr');
+      if (!r) tr.className = 'filler';
+      var cells = r ? [r.y, MONTHS[r.m], r.a ? fmt(r.a, code) : '', dmy(r.d)] : ['', '', '', ''];
+      cells.forEach(function (c) { var td = document.createElement('td'); td.textContent = c; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    text($('rTotal'), fmt(total, code));
+    var words = total ? amountToWords(total, code) : '';
+    text($('rWords'), words);
+    text($('wordsOut'), words ? 'بالأحرف: ' + words : 'أدخل المبلغ ليظهر بالأحرف هنا.');
+
+    save({ org: $('org').value, city: $('city').value, currency: code, font: $('font').value, adminName: $('adminName').value, no: $('no').value });
+  }
+  $('form').addEventListener('input', render);
+  $('form').addEventListener('change', render);
+  $('form').addEventListener('submit', function (e) { e.preventDefault(); });
+  $('addRow').addEventListener('click', function () { addRow(); render(); });
+
+  /* ---------- Actions ---------- */
+  var inFrame = (function () { try { return window.self !== window.top; } catch (e) { return true; } })();
+
+  // Two copies of the current receipt on one A4 sheet
+  function buildSheet() {
+    var sheet = $('printSheet'); sheet.textContent = '';
+    [['النسخة الأصلية', 'ORIGINAL'], ['نسخة', 'COPY']].forEach(function (lbl, i) {
+      if (i) { var cut = document.createElement('div'); cut.className = 'cut'; cut.textContent = '✂ قص هنا'; sheet.appendChild(cut); }
+      var box = document.createElement('div'); box.className = 'copy';
+      var c = $('receipt').cloneNode(true);
+      c.removeAttribute('id');
+      Array.prototype.forEach.call(c.querySelectorAll('[id]'), function (e) { e.removeAttribute('id'); });
+      c.querySelector('.r-copy').textContent = lbl[0] + ' · ' + lbl[1];
+      box.appendChild(c); sheet.appendChild(box);
+    });
+    // Shrink a copy that would not fit its half of the page (many payment rows)
+    Array.prototype.forEach.call(sheet.querySelectorAll('.copy'), function (box) {
+      var r = box.firstChild, k = box.clientHeight / r.scrollHeight;
+      if (k < 1) r.style.transform = 'scale(' + k.toFixed(3) + ')';
+    });
+    return sheet;
+  }
+  window.addEventListener('beforeprint', buildSheet);
+
+  function sheetPDF() {
+    var sheet = buildSheet();
+    return (document.fonts ? document.fonts.ready : Promise.resolve()).then(function () {
+      return html2canvas(sheet, { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 });
+    }).then(function (canvas) {
+      var pdf = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 296);
+      return { blob: pdf.output('blob'), image: canvas.toDataURL('image/png') };
+    });
+  }
+
+  if (inFrame) {
+    // Inside claude.ai the page cannot open the print dialog: hand over an A4 PDF to print instead
+    text($('btnPrint'), 'PDF للطباعة (A4)');
+    $('btnPrint').addEventListener('click', function () {
+      if (!window.html2canvas || !window.jspdf) { toast('تعذّر تحميل أداة PDF. تحقق من الاتصال بالإنترنت.'); return; }
+      var btn = this; btn.disabled = true;
+      var name = 'إيصال-' + ($('no').value || '1') + '.pdf';
+      sheetPDF().then(function (out) {
+        var use = window.claude && window.claude.use ? window.claude.use('downloads') : Promise.resolve(null);
+        return use.then(function (dl) {
+          if (dl) return dl.save({ filename: name, data: out.blob }).catch(function (e) {
+            if (e && e.code !== 'declined') toast('تعذّر حفظ الملف. حاول مرة أخرى.');
+          });
+          // No file saving here: show the sheet as an image to save and print
+          $('outImg').src = out.image; $('dl').hidden = true; $('overlay').hidden = false;
+        });
+      }).catch(function () { toast('تعذّر إنشاء ملف PDF. حاول مرة أخرى.'); })
+        .then(function () { btn.disabled = false; });
+    });
+  } else {
+    $('btnPrint').addEventListener('click', function () { buildSheet(); window.print(); });
+  }
+
+  $('btnNew').addEventListener('click', function () {
+    $('no').value = nextNumber();
+    setEditing(null);
+    $('payee').value = ''; $('reason').value = '';
+    $('date').value = todayISO();
+    rowsEl.textContent = ''; addRow();
+    padEmp.clear();
+    render();
+    toast('إيصال جديد رقم ' + $('no').value);
+  });
+
+  $('btnImage').addEventListener('click', function () {
+    if (!window.html2canvas) { toast('تعذّر تحميل أداة الصور. تحقق من الاتصال بالإنترنت.'); return; }
+    var btn = this; btn.disabled = true;
+    var el = $('receipt');
+    html2canvas(el, { scale: 2, backgroundColor: '#fffdf8', windowWidth: Math.max(1000, el.scrollWidth + 80) }).then(function (canvas) {
+      var url = canvas.toDataURL('image/png');
+      $('outImg').src = url;
+      var dl = $('dl');
+      dl.hidden = inFrame;
+      dl.href = url; dl.download = 'receipt-' + ($('no').value || '1') + '.png';
+      $('overlay').hidden = false;
+    }).catch(function () { toast('تعذّر إنشاء الصورة. حاول مرة أخرى.'); })
+      .then(function () { btn.disabled = false; });
+  });
+  $('closeOverlay').addEventListener('click', function () { $('overlay').hidden = true; });
+  $('overlay').addEventListener('click', function (e) { if (e.target === this) this.hidden = true; });
+
+  /* ---------- Archive ---------- */
+  var ARCH_KEY = 'receipt-archive-v1';
+  var archive = [];      // newest first
+  var currentId = null;  // archive id of the receipt being edited
+  var dbCol = null;      // shared artifact database, when available
+
+  function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function sortArchive() { archive.sort(function (a, b) { return (b.savedAt || '').localeCompare(a.savedAt || ''); }); }
+  function localLoad() { try { return JSON.parse(localStorage.getItem(ARCH_KEY) || '[]'); } catch (e) { return []; } }
+  function localWrite() { localStorage.setItem(ARCH_KEY, JSON.stringify(archive)); }
+
+  function getState() {
+    var rows = readRows();
+    return {
+      no: $('no').value.trim(), org: $('org').value.trim(), city: $('city').value.trim(),
+      date: $('date').value, currency: $('currency').value,
+      payee: $('payee').value.trim(), reason: $('reason').value.trim(),
+      adminName: $('adminName').value.trim(),
+      rows: rows, total: rows.reduce(function (s, r) { return s + r.a; }, 0),
+      adminSig: padAdmin.toData(), empSig: padEmp.toData(),
+      logo: logo, font: $('font').value
+    };
+  }
+  function setState(st) {
+    $('no').value = st.no || ''; $('org').value = st.org || ''; $('city').value = st.city || '';
+    $('date').value = st.date || todayISO(); $('currency').value = st.currency || 'LBP';
+    $('payee').value = st.payee || ''; $('reason').value = st.reason || '';
+    $('adminName').value = st.adminName || '';
+    $('font').value = st.font || 'kufi';
+    logo = st.logo || null;
+    rowsEl.textContent = '';
+    (st.rows && st.rows.length ? st.rows : [{}]).forEach(function (r) {
+      addRow({ y: r.y, m: r.m, a: r.a ? r.a.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '', d: r.d });
+    });
+    // Load signatures without overwriting the remembered admin signature
+    padAdmin.clear(false); padEmp.clear(false);
+    if (st.adminSig) padAdmin.drawImage(st.adminSig, false);
+    if (st.empSig) padEmp.drawImage(st.empSig, false);
+    setSig($('rSigAdmin'), st.adminSig || null); setSig($('rSigEmp'), st.empSig || null);
+    render();
+  }
+
+  function setEditing(id) {
+    currentId = id;
+    var item = id && archive.filter(function (r) { return r.id === id; })[0];
+    $('editing').hidden = !item;
+    if (item) text($('editing'), 'تعديل الإيصال رقم ' + (item.no || '—'));
+    text($('btnSave'), item ? 'حفظ التعديلات' : 'حفظ في الأرشيف');
+  }
+
+  function nextNumber() {
+    var max = 0;
+    archive.forEach(function (r) { var n = parseInt(r.no, 10); if (n > max) max = n; });
+    var cur = parseInt($('no').value, 10) || 0;
+    return Math.max(max, cur) + 1;
+  }
+
+  /* Storage: the server's database when the page is served by it, the artifact's
+     database inside claude.ai, otherwise this browser's local storage. */
+  var mode = 'local';            // 'local' | 'db' | 'server' | 'locked'
+  var serverKey = '';
+  try { serverKey = localStorage.getItem('receipt-server-key') || ''; } catch (e) {}
+
+  function api(method, path, body) {
+    return fetch('/api/receipts' + path, {
+      method: method,
+      headers: body ? { 'content-type': 'application/json', 'x-receipts-key': serverKey } : { 'x-receipts-key': serverKey },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (j) {
+        if (res.ok) return j;
+        if (res.status === 401) lock();
+        var err = new Error(j.error || 'http_' + res.status); err.code = j.error || 'http_' + res.status; err.status = res.status;
+        throw err;
+      });
+    });
+  }
+  function loadServerList() {
+    return api('GET', '/').then(function (j) {
+      mode = 'server'; archive = j.receipts || []; sortArchive();
+      $('lockForm').hidden = true; $('list').hidden = false;
+      text($('where'), 'محفوظ على السيرفر، ويظهر على كل أجهزتك');
+      if (currentId) setEditing(currentId);
+      renderArchive();
+    });
+  }
+  function lock() {
+    mode = 'locked'; archive = [];
+    $('lockForm').hidden = false; $('list').hidden = true;
+    text($('where'), 'الأرشيف على السيرفر');
+    renderArchive();
+  }
+
+  function saveReceipt() {
+    var st = getState();
+    if (!st.total) { toast('أدخل مبلغ دفعة واحدة على الأقل قبل الحفظ.'); return; }
+    if (mode === 'locked') { showView('archive'); toast('أدخل كلمة سر الأرشيف أولاً.'); $('lockKey').focus(); return; }
+    var id = currentId || uid();
+    var existing = archive.filter(function (r) { return r.id === id; })[0];
+    st.id = id;
+    st.createdAt = existing ? existing.createdAt : new Date().toISOString();
+    st.savedAt = new Date().toISOString();
+    var btn = $('btnSave'); btn.disabled = true;
+    var done = function (saved) {
+      archive = archive.filter(function (r) { return r.id !== id; }); archive.push(saved || st); sortArchive();
+      setEditing(id); renderArchive();
+      toast(existing ? 'حُفظت التعديلات' : 'حُفظ الإيصال رقم ' + (st.no || '—') + ' في الأرشيف');
+    };
+    var p;
+    if (mode === 'server') {
+      p = api('PUT', '/' + id, st).then(function (j) { return j.receipt; });
+    } else if (mode === 'db') {
+      var body = JSON.parse(JSON.stringify(st)); delete body.id;
+      p = dbCol.doc(id).set(body);
+    } else {
+      p = new Promise(function (ok) {
+        var prev = archive.slice();
+        archive = archive.filter(function (r) { return r.id !== id; }); archive.push(st);
+        try { localWrite(); } catch (e) { archive = prev; throw e; }
+        ok();
+      });
+    }
+    p.then(done, function (e) {
+      var code = e && e.code;
+      toast(code === 'unauthorized' ? 'كلمة سر الأرشيف غير صحيحة. أدخلها من جديد في الأرشيف.'
+        : code === 'quota_exceeded' || (e && e.name === 'QuotaExceededError') ? 'الأرشيف ممتلئ. احذف بعض الإيصالات القديمة ثم احفظ مجدداً.'
+        : code === 'invalid_argument' ? 'لا تملك صلاحية الحفظ في هذا الأرشيف.'
+        : code === 'bad_receipt' ? 'بيانات الإيصال غير مكتملة. تحقق من المبالغ.'
+        : 'تعذّر الحفظ. تحقق من الاتصال وحاول مرة أخرى.');
+    }).then(function () { btn.disabled = false; });
+  }
+
+  function deleteReceipt(id) {
+    var p = mode === 'server' ? api('DELETE', '/' + id)
+      : mode === 'db' ? dbCol.doc(id).delete()
+      : new Promise(function (ok) { archive = archive.filter(function (r) { return r.id !== id; }); localWrite(); ok(); });
+    p.then(function () {
+      archive = archive.filter(function (r) { return r.id !== id; });
+      if (currentId === id) setEditing(null);
+      renderArchive(); toast('حُذف الإيصال');
+    }, function (e) { if (!(e && e.code === 'unauthorized')) toast('تعذّر الحذف. حاول مرة أخرى.'); });
+  }
+
+  function openReceipt(id) {
+    var item = archive.filter(function (r) { return r.id === id; })[0]; if (!item) return;
+    // The server's list leaves out the signatures; fetch the whole receipt
+    var p = mode === 'server' ? api('GET', '/' + id).then(function (j) { return j.receipt; }) : Promise.resolve(item);
+    p.then(function (full) {
+      showView('edit');
+      setState(full); setEditing(id);
+    }, function (e) { if (!(e && e.code === 'unauthorized')) toast('تعذّر فتح الإيصال. حاول مرة أخرى.'); });
+  }
+
+  var pendingDelete = null;
+  function renderArchive() {
+    text($('archCount'), archive.length ? '(' + archive.length + ')' : '');
+    var q = $('search').value.trim().toLowerCase();
+    var items = archive.filter(function (r) {
+      return !q || String(r.no || '').toLowerCase().indexOf(q) >= 0 || (r.payee || '').toLowerCase().indexOf(q) >= 0 || (r.reason || '').toLowerCase().indexOf(q) >= 0;
+    });
+    var list = $('list'); list.textContent = '';
+    if (!items.length) {
+      var e = document.createElement('div'); e.className = 'empty';
+      e.textContent = archive.length ? 'لا توجد إيصالات تطابق البحث.' : 'لا توجد إيصالات محفوظة بعد. عبّئ إيصالاً واضغط «حفظ في الأرشيف» ليظهر هنا.';
+      list.appendChild(e); return;
+    }
+    var head = document.createElement('div'); head.className = 'item head';
+    ['الرقم', 'الموظف', 'المبلغ', 'التاريخ', ''].forEach(function (h) { var d = document.createElement('div'); d.textContent = h; head.appendChild(d); });
+    list.appendChild(head);
+    items.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'item';
+      var no = document.createElement('div'); no.className = 'no'; no.textContent = '#' + (r.no || '—');
+      var who = document.createElement('div'); who.className = 'who';
+      var b = document.createElement('b'); b.textContent = r.payee || 'بدون اسم';
+      var sm = document.createElement('small');
+      var months = (r.rows || []).filter(function (x) { return x.a; }).map(function (x) { return MONTHS[x.m] + ' ' + x.y; });
+      sm.textContent = [r.reason, months.join('، ')].filter(Boolean).join(' · ');
+      who.appendChild(b); who.appendChild(sm);
+      var amt = document.createElement('div'); amt.className = 'amt'; amt.textContent = fmt(r.total || 0, r.currency || 'LBP');
+      var dt = document.createElement('div'); dt.className = 'dt'; dt.textContent = dmy(r.date);
+      var act = document.createElement('div'); act.className = 'act';
+      var open = document.createElement('button'); open.type = 'button'; open.className = 'small'; open.textContent = 'فتح';
+      open.addEventListener('click', function () { openReceipt(r.id); });
+      var del = document.createElement('button'); del.type = 'button'; del.className = 'small danger';
+      del.textContent = pendingDelete === r.id ? 'تأكيد الحذف' : 'حذف';
+      del.addEventListener('click', function () {
+        if (pendingDelete === r.id) { pendingDelete = null; deleteReceipt(r.id); }
+        else { pendingDelete = r.id; renderArchive(); }
+      });
+      act.appendChild(open); act.appendChild(del);
+      [no, who, amt, dt, act].forEach(function (c) { row.appendChild(c); });
+      list.appendChild(row);
+    });
+  }
+
+  function showView(v) {
+    var edit = v === 'edit';
+    $('viewEdit').hidden = !edit; $('viewArchive').hidden = edit; $('editActions').hidden = !edit;
+    $('tabEdit').setAttribute('aria-selected', String(edit));
+    $('tabArchive').setAttribute('aria-selected', String(!edit));
+    if (!edit) { pendingDelete = null; renderArchive(); }
+    else window.dispatchEvent(new Event('resize')); // re-measure signature pads
+  }
+  $('tabEdit').addEventListener('click', function () { showView('edit'); });
+  $('tabArchive').addEventListener('click', function () { showView('archive'); });
+  $('search').addEventListener('input', renderArchive);
+  $('btnSave').addEventListener('click', saveReceipt);
+
+  $('lockForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    serverKey = $('lockKey').value.trim();
+    $('lockErr').hidden = true;
+    loadServerList().then(function () {
+      try { localStorage.setItem('receipt-server-key', serverKey); } catch (err) {}
+      $('lockKey').value = '';
+      toast('تم فتح الأرشيف');
+    }, function (err) {
+      $('lockErr').hidden = false;
+      text($('lockErr'), err && err.status === 401 ? 'كلمة السر غير صحيحة.' : 'تعذّر الاتصال بالسيرفر. حاول مرة أخرى.');
+    });
+  });
+
+  archive = localLoad(); sortArchive();
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('db').then(function (db) {
+      if (!db) return;
+      mode = 'db'; dbCol = db.collection('receipts');
+      text($('where'), 'محفوظ في حسابك، ويظهر على كل أجهزتك');
+      archive = []; renderArchive();
+      dbCol.orderBy('savedAt', 'desc').limit(1000).onSnapshot(function (snap) {
+        archive = snap.docs.map(function (d) { var o = JSON.parse(JSON.stringify(d.data())); o.id = d.id; return o; });
+        if (currentId) setEditing(currentId);
+        renderArchive();
+      }, function () {
+        mode = 'local'; dbCol = null; archive = localLoad(); sortArchive();
+        text($('where'), 'محفوظ على هذا الجهاز فقط'); renderArchive();
+      });
+    }, function () {});
+  } else if (/^https?:$/.test(location.protocol)) {
+    // Served by our backend: use its database when the archive API is set up
+    loadServerList().catch(function (e) {
+      if (e && e.status === 401) return; // lock() already asked for the password
+      if (e && e.code === 'not_configured') text($('where'), 'أرشيف السيرفر غير مفعّل بعد. الإيصالات محفوظة على هذا الجهاز فقط.');
+    });
+  }
+
+  /* ---------- Boot ---------- */
+  var s = load();
+  if (s.org) $('org').value = s.org;
+  if (s.city != null) $('city').value = s.city;
+  if (s.currency) $('currency').value = s.currency;
+  if (s.font) $('font').value = s.font;
+  if (s.logo) logo = s.logo;
+  if (s.adminName) $('adminName').value = s.adminName;
+  if (s.no) $('no').value = s.no;
+  if (s.keepAdmin === false) $('keepAdmin').checked = false;
+  $('date').value = todayISO();
+  if (s.org || s.no) {
+    addRow();
+  } else {
+    // First visit: an example filled from the paper receipt
+    $('date').value = '2026-01-29';
+    addRow({ y: 2025, m: 11, a: '32,000,000', d: '2026-01-29' });
+  }
+  if (s.adminSig && $('keepAdmin').checked) padAdmin.drawImage(s.adminSig);
+  render();
+  renderArchive();
+})();
+</script>
+<!-- END-PAGE -->
+</body>
+</html>
