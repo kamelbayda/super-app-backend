@@ -46,6 +46,9 @@ function clean(body) {
     m: Math.min(Math.max(parseInt(r && r.m, 10) || 0, 0), 11),
     a: Math.max(Number(r && r.a) || 0, 0),
     d: DATE_RE.test(r && r.d) ? r.d : '',
+    // Optional period the payment covers (من / إلى)
+    f: DATE_RE.test(r && r.f) ? r.f : '',
+    t: DATE_RE.test(r && r.t) ? r.t : '',
   }));
   const total = Math.round(rows.reduce((s, r) => s + r.a, 0) * 100) / 100;
   if (!(total > 0) || total >= 1e16) return null;

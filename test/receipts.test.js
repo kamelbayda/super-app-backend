@@ -27,7 +27,7 @@ test('receipts API', { skip: !DB && 'TEST_DATABASE_URL not set' }, async (t) => 
   const receipt = {
     no: '1', org: 'مدرسة القلمون للصبيان', city: 'القلمون', date: '2026-01-29', currency: 'LBP',
     payee: 'أحمد محمد', reason: 'راتب شهري', adminName: '',
-    rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29' }],
+    rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29', f: '2025-12-01', t: '2025-12-31' }],
     total: 1, // ignored: the server recomputes it
     adminSig: SIG, empSig: SIG, logo: SIG, font: 'naskh',
   };
@@ -68,6 +68,8 @@ test('receipts API', { skip: !DB && 'TEST_DATABASE_URL not set' }, async (t) => 
     assert.equal(r.body.receipt.empSig, SIG);
     assert.equal(r.body.receipt.logo, SIG);
     assert.equal(r.body.receipt.font, 'naskh');
+    assert.equal(r.body.receipt.rows[0].f, '2025-12-01');
+    assert.equal(r.body.receipt.rows[0].t, '2025-12-31');
     assert.equal(r.body.receipt.org, 'مدرسة القلمون للصبيان');
   });
 
