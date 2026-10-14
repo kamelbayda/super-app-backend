@@ -14,7 +14,8 @@ The `licenses` and `receipts` tables are created automatically on start.
 
 ## Receipts (إيصال قبض)
 
-A receipt maker is served at **`/receipt`**: organisation name, amounts in figures and Arabic
+A receipt maker is served at **`/receipt`**, by this Express server and by the Cloudflare Worker
+(see [`worker/README.md`](worker/README.md)): organisation name, amounts in figures and Arabic
 words, admin and employee signatures, print, and an archive of saved receipts.
 
 - Set **`RECEIPTS_API_KEY`** in Railway to a long random string. It is the archive's password:
