@@ -344,7 +344,7 @@ test('receipts on Workers', async (t) => {
   const SIG = 'data:image/png;base64,iVBORw0KGgo=';
   const receipt = {
     no: '1', org: 'مدرسة القلمون للصبيان', city: 'القلمون', date: '2026-01-29', currency: 'LBP',
-    payee: 'أحمد محمد', reason: 'راتب شهري', rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29' }],
+    payee: 'أحمد محمد', reason: 'راتب شهري', rows: [{ y: '2025', m: 11, a: 32000000, d: '2026-01-29', f: '2025-12-01', t: '2025-12-31' }],
     total: 1, adminSig: SIG, empSig: SIG, logo: SIG, font: 'naskh',
   };
 
@@ -374,6 +374,7 @@ test('receipts on Workers', async (t) => {
     assert.equal(full.body.receipt.empSig, SIG);
     assert.equal(full.body.receipt.logo, SIG);
     assert.equal(full.body.receipt.font, 'naskh');
+    assert.equal(full.body.receipt.rows[0].t, '2025-12-31');
 
     assert.equal((await call('PUT', '/r1', { ...receipt, payee: 'أحمد علي' })).status, 200);
     assert.equal((await call('GET', '/r1')).body.receipt.payee, 'أحمد علي');
