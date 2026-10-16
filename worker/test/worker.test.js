@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
 
 const PORT = 8799;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -14,16 +15,33 @@ const ADMIN = 'test-admin-key';
 const persist = mkdtempSync(join(tmpdir(), 'pos-licensing-'));
 const wrangler = join(process.cwd(), 'node_modules', '.bin', 'wrangler');
 
+// Stands in for Resend: records every email the worker sends; a 'fail@' address gets an error.
+const MAIL_PORT = 8798;
+const mails = [];
+const mailServer = http.createServer((req, res) => {
+  let data = '';
+  req.on('data', (c) => (data += c));
+  req.on('end', () => {
+    const mail = { auth: req.headers.authorization, ...JSON.parse(data || '{}') };
+    mails.push(mail);
+    const bad = mail.to?.[0]?.startsWith('fail@');
+    res.writeHead(bad ? 422 : 200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(bad ? { name: 'validation_error', message: 'nope' } : { id: 'mail-' + mails.length }));
+  });
+});
+
 let proc;
 test.before(async () => {
-  proc = spawn(wrangler, ['dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', `ADMIN_API_KEY:${ADMIN} `], { stdio: 'pipe' });
+  await new Promise((r) => mailServer.listen(MAIL_PORT, '127.0.0.1', r));
+  proc = spawn(wrangler, ['dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', `ADMIN_API_KEY:${ADMIN} `,
+    '--var', 'RESEND_API_KEY:re_test', '--var', `RESEND_API_URL:http://127.0.0.1:${MAIL_PORT}/emails`], { stdio: 'pipe' });
   for (let i = 0; i < 60; i++) {
     try { if ((await fetch(`${BASE}/api/health`)).ok) return; } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error('wrangler dev did not start');
 });
-test.after(() => { proc?.kill(); rmSync(persist, { recursive: true, force: true }); });
+test.after(() => { proc?.kill(); mailServer.close(); rmSync(persist, { recursive: true, force: true }); });
 
 const sql = (command) =>
   execFileSync(wrangler, ['d1', 'execute', 'pos-licensing', '--local', '--persist-to', persist, '--command', command], { stdio: 'pipe' });
@@ -263,6 +281,69 @@ test('licence API on Workers', async (t) => {
     assert.ok(!(await get('/api/admin/trials/messages', admin)).messages.some((m) => m.id === one.body.id));
   });
 
+  await t.test('trial messages can also go by email, from sales@', async () => {
+    const ip = { 'cf-connecting-ip': '10.9.9.6' };
+    await post('/api/trials/ping', { deviceId: 'mail-a', shopName: 'Shop A', ownerName: 'Sami', ownerEmail: 'sami@a.co', invoicesUsed: 5 }, ip);
+    await post('/api/trials/ping', { deviceId: 'mail-a2', shopName: 'Shop A', ownerEmail: 'sami@a.co' }, ip); // same owner, 2nd computer
+    await post('/api/trials/ping', { deviceId: 'mail-b', shopName: 'Shop B', ownerEmail: 'fail@b.co' }, ip);
+    await post('/api/trials/ping', { deviceId: 'mail-c', shopName: 'No Email' }, ip);
+    await post('/api/trials/ping', { deviceId: 'mail-paid', ownerEmail: 'paid@c.co', licenseKey: 'POS-AAAAA-BBBBB-CCCCC' }, ip);
+
+    const before = mails.length;
+    const one = await post('/api/admin/trials/messages', { deviceId: 'mail-a', text: 'مرحباً {name}، بقي لك {left} فواتير في {shop}', email: true, subject: 'عرض لـ {shop}' }, admin);
+    assert.equal(one.body.emailed, 1);
+    const m = mails[mails.length - 1];
+    assert.equal(m.from, 'BeeCash <sales@beecash.app>');
+    assert.deepEqual(m.to, ['sami@a.co']);
+    assert.equal(m.subject, 'عرض لـ Shop A');
+    assert.equal(m.text, 'مرحباً Sami، بقي لك 10 فواتير في Shop A');
+
+    const none = await post('/api/admin/trials/messages', { deviceId: 'mail-c', text: 'hi', email: true }, admin);
+    assert.equal(none.body.emailTargets, 0);
+    assert.equal(none.body.emailError, 'no_email');
+
+    // to everyone on trial: one email per address, not to subscribers, a failure is reported
+    const mark = mails.length;
+    const all = await post('/api/admin/trials/messages', { deviceId: '*', text: 'عرض', email: true }, admin);
+    const to = mails.slice(mark).map((x) => x.to[0]);
+    assert.equal(to.filter((x) => x === 'sami@a.co').length, 1);
+    assert.ok(to.includes('fail@b.co') && !to.includes('paid@c.co'));
+    assert.equal(all.body.emailError, 'validation_error');
+    assert.equal(all.body.emailed, all.body.emailTargets - 1);
+    assert.equal(mails[mark].subject, 'رسالة من BeeCash');
+
+    // without email: true nothing is mailed
+    const quiet = mails.length;
+    await post('/api/admin/trials/messages', { deviceId: 'mail-a', text: 'in app only' }, admin);
+    assert.equal(mails.length, quiet);
+    assert.ok(mails.length > before);
+  });
+
+  await t.test('admin emails: status, free email from support@, key by email from info@', async () => {
+    const st = await (await fetch(`${BASE}/api/admin/mail`, { headers: admin })).json();
+    assert.equal(st.configured, true);
+    assert.deepEqual(st.senders, { sales: 'sales@beecash.app', info: 'info@beecash.app', support: 'support@beecash.app' });
+    assert.equal((await post('/api/admin/mail', { to: 'x@y.co', subject: 's', text: 't' })).status, 401);
+    assert.equal((await post('/api/admin/mail', { to: 'bad', subject: 's', text: 't' }, admin)).body.error, 'bad_email');
+    assert.equal((await post('/api/admin/mail', { to: 'x@y.co', subject: '', text: 't' }, admin)).status, 400);
+    const sent = await post('/api/admin/mail', { to: 'X@Y.co', subject: 'بخصوص العطل', text: 'تم إصلاح المشكلة' }, admin);
+    assert.equal(sent.body.from, 'support@beecash.app');
+    assert.equal(mails[mails.length - 1].from, 'BeeCash Support <support@beecash.app>');
+    assert.deepEqual(mails[mails.length - 1].to, ['x@y.co']);
+    assert.equal((await post('/api/admin/mail', { to: 'x@y.co', subject: 'عرض', text: 't', from: 'sales' }, admin)).body.from, 'sales@beecash.app');
+    assert.equal((await post('/api/admin/mail', { to: 'fail@y.co', subject: 's', text: 't' }, admin)).status, 502);
+
+    const lic = (await post('/api/admin/licenses', { period: 'year', email: 'keymail@mailtest.dev' }, admin)).body.licenses[0];
+    const r = await post(`/api/admin/licenses/${lic.key}/send-email`, {}, admin);
+    assert.equal(r.body.to, 'keymail@mailtest.dev');
+    assert.equal(mails[mails.length - 1].from, 'BeeCash <info@beecash.app>');
+    assert.ok(mails[mails.length - 1].text.includes(lic.key));
+    const bare = (await post('/api/admin/licenses', { period: 'year' }, admin)).body.licenses[0];
+    assert.equal((await post(`/api/admin/licenses/${bare.key}/send-email`, {}, admin)).body.error, 'bad_email');
+    assert.equal((await post(`/api/admin/licenses/${bare.key}/send-email`, { to: 'other@mailtest.dev' }, admin)).body.to, 'other@mailtest.dev');
+    assert.equal((await post('/api/admin/licenses/POS-NOPEX-NOPEX-NOPEX/send-email', {}, admin)).status, 404);
+  });
+
   await t.test('keys bound before multi-device support keep their device', async () => {
     const key = 'POS-LEGAC-YKEY2-34567';
     sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);
@@ -327,6 +408,14 @@ test('licence API on Workers', async (t) => {
     assert.equal(approved.body.license.businessType, 'phones');
     assert.equal(approved.body.license.maxDevices, 2);
     assert.equal(approved.body.license.email, 'ali@phone.city');
+    // the key goes to the customer by email, from info@
+    assert.equal(approved.body.emailed, true);
+    const keyMail = mails.findLast((m) => m.to[0] === 'ali@phone.city');
+    assert.equal(keyMail.from, 'BeeCash <info@beecash.app>');
+    assert.equal(keyMail.auth, 'Bearer re_test');
+    assert.ok(keyMail.text.includes(approved.body.license.key));
+    assert.ok(keyMail.text.includes('Ali') && keyMail.text.includes('Phone City'));
+    assert.ok(keyMail.html.includes(approved.body.license.key) && keyMail.html.includes('dir="rtl"'));
     assert.equal((await post(`/api/admin/requests/${id}/approve`, {}, admin)).status, 409);
 
     const st = await status();

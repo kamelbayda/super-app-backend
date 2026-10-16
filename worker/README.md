@@ -41,6 +41,26 @@ It has the same API as the Express version in `../licensing`, so the POS app and
     ` && printf '%s' "$RECEIPTS_API_KEY" | npx wrangler secret put RECEIPTS_API_KEY`
 - الطباعة بتطلع على ورقة A4 وحدة فيها النسخة الأصلية والنسخة (COPY).
 
+## الإيميلات (Resend)
+
+السيرفر بيبعت إيميلات عن طريق [Resend](https://resend.com) (مجاني لحد 3000 إيميل بالشهر، 100 باليوم):
+
+| النوع | من |
+|---|---|
+| رسائل التجربة والعروض (خيار "ابعتها كمان عالإيميل") | `sales@beecash.app` |
+| مفتاح التفعيل (أوتوماتيك عند الموافقة على طلب، أو زر "ابعت المفتاح بالإيميل") | `info@beecash.app` |
+| إيميل حر من صفحة الإدارة (الأعطال والدعم، أو أي عنوان من التلاتة) | `support@beecash.app` |
+
+التشغيل:
+1. بـ Resend: **Domains ← Add Domain ← `beecash.app`**، وكبس **Auto configure** مع Cloudflare لحد ما يصير **Verified**.
+2. **API Keys ← Create API Key** (Sending access).
+3. بـ Cloudflare: Worker **`pos-licensing` ← Settings ← Variables and Secrets ← Add**: النوع **Secret**، الاسم `RESEND_API_KEY`، والقيمة المفتاح.
+   (إذا ما في هالخيار، حطّو متل `ADMIN_API_KEY` بالـ Builds وزيد على الـ Deploy command:
+   ` && printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY`)
+
+بلا هالمفتاح كل شي بيضل شغّال، بس ما بينبعت إيميلات، وصفحة الإدارة بتقلّك "مش مفعّل".
+الردود على الإيميلات بتوصل على Google Workspace لأنو الـ MX ضلّ عند غوغل.
+
 ## الاستعمال اليومي
 من صفحة `/admin` (بتشتغل على الموبايل والـ iPad):
 - **إنشاء مفتاح:** سنوي أو مدى الحياة لزبون.

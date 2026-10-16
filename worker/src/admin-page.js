@@ -87,10 +87,27 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
         <div class="row" style="margin-bottom:6px;gap:6px;flex-wrap:wrap" id="msgTemplates"></div>
         <textarea id="msgText" rows="4" style="width:100%;box-sizing:border-box" placeholder="اكتب رسالتك..."></textarea>
         <p class="muted" style="margin:4px 0 8px">بتطلع عند الزبون جوّا البرنامج مع زر "⭐ اشترك الآن". فيك تكتب <b>{name}</b> لاسم صاحب المحل، <b>{shop}</b> لاسم المحل، <b>{left}</b> لعدد الفواتير الباقية من التجربة.</p>
+        <label style="display:flex;gap:8px;align-items:center;margin:0 0 8px;font-weight:700"><input type="checkbox" id="msgEmail" style="width:auto"> 📧 ابعتها كمان عالإيميل <span class="muted" dir="ltr">(sales@beecash.app)</span></label>
+        <input id="msgSubject" class="hidden" placeholder="عنوان الإيميل، مثلاً: عرض خاص لـ {shop}" style="margin-bottom:8px">
         <div class="row" style="gap:6px"><button id="msgSend">إرسال</button><button class="secondary" id="msgCancel">إلغاء</button></div>
       </div>
       <div id="sentList" class="hidden" style="margin-bottom:10px"></div>
       <div id="trials"></div>
+    </section>
+
+    <section class="card" id="mailCard">
+      <h2>📧 الإيميلات</h2>
+      <div id="mailStatus" class="muted">…</div>
+      <p class="muted">الترويج ورسائل التجربة بتطلع من <b dir="ltr">sales@beecash.app</b>، مفاتيح التفعيل من <b dir="ltr">info@beecash.app</b>، والردود على الأعطال من <b dir="ltr">support@beecash.app</b>.</p>
+      <div class="row">
+        <div><label for="mailTo">إلى</label><input id="mailTo" type="email" dir="ltr" placeholder="name@email.com" autocapitalize="none"></div>
+        <div style="flex:0 1 220px"><label for="mailFrom">من</label>
+          <select id="mailFrom"><option value="support">🛠️ support@ (الأعطال والدعم)</option><option value="info">ℹ️ info@ (معلومات ومفاتيح)</option><option value="sales">📣 sales@ (عروض وترويج)</option></select></div>
+      </div>
+      <label for="mailSubject" style="margin-top:8px">العنوان</label><input id="mailSubject" placeholder="مثلاً: بخصوص المشكلة في الطباعة">
+      <label for="mailText" style="margin-top:8px">الرسالة</label>
+      <textarea id="mailText" rows="5" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text);font:inherit;box-sizing:border-box"></textarea>
+      <div class="row" style="margin-top:10px"><button id="mailSend">إرسال الإيميل</button></div>
     </section>
 
     <section class="card">
@@ -157,7 +174,8 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح', already_decided: 'هالطلب انعملو قرار من قبل', device_not_found: 'هالجهاز مش مرتبط بالمفتاح' };
+const ERR = { unauthorized: 'مفتاح الإدارة غير صحيح', admin_key_not_set: 'ما في ADMIN_API_KEY على السيرفر بعد. زيده من Settings ← Variables and Secrets واعمل Deploy', invalid_key: 'المفتاح غير موجود', bad_plan: 'نوع غير صالح', bad_email: 'الإيميل مش مكتوب صح', already_decided: 'هالطلب انعملو قرار من قبل', device_not_found: 'هالجهاز مش مرتبط بالمفتاح', mail_not_configured: 'الإيميلات مش مفعّلة بعد: حط RESEND_API_KEY بـ Cloudflare', mail_failed: 'ما قدرنا نوصل لخدمة الإيميل، جرّب كمان شوي', validation_error: 'Resend رفض الإيميل: تأكّد إنو الدومين beecash.app صار Verified بـ Resend', no_email: 'ما في إيميل مسجّل', bad_request: 'في خانة ناقصة' };
+const mailError = (code) => ERR[code] || code;
 const PERIOD = { month: 'شهري', year: 'سنوي', life: 'مدى الحياة' };
 const BIZ = { supermarket: '🛒 سوبرماركت', phones: '📱 محل تلفونات' };
 const errMsg = (e) => ERR[e.message] || ('خطأ: ' + e.message);
@@ -204,7 +222,8 @@ function render(list) {
       '<div class="actions">' +
       '<button class="secondary" data-copy="' + esc(l.key) + '">نسخ</button>' +
       (l.devices ? '<button class="secondary" data-show-devices="' + esc(l.key) + '">💻 الأجهزة (' + l.devices + ')</button>' : '') +
-      '<button class="secondary" data-email="' + esc(l.key) + '" data-current="' + esc(l.email || '') + '">' + (l.email ? 'تعديل الإيميل' : 'إضافة إيميل') + '</button>' +
+      (l.email && l.status !== 'revoked' ? '<button class="secondary" data-send-key="' + esc(l.key) + '" data-to="' + esc(l.email) + '">📧 ابعت المفتاح بالإيميل</button>' : '') +
+      '<button class="secondary" data-email="' + esc(l.key) + '" data-current=""' + esc(l.email || '') + '">' + (l.email ? 'تعديل الإيميل' : 'إضافة إيميل') + '</button>' +
       (l.status !== 'revoked' ? '<button class="secondary" data-devices="' + esc(l.key) + '" data-max="' + (l.maxDevices || 1) + '">عدد الأجهزة</button>' : '') +
       (l.devices && l.status !== 'revoked' ? '<button class="secondary" data-reset="' + esc(l.key) + '">نقل لأجهزة جديدة</button>' : '') +
       (l.status !== 'revoked' ? '<button class="danger" data-revoke="' + esc(l.key) + '">إلغاء</button>' : '') +
@@ -300,6 +319,15 @@ async function loadTrials() {
   }).join('') || '<p class="muted">ما في حدا بعد.</p>';
 }
 
+let mailReady = false;
+async function loadMail() {
+  const m = await api('/api/admin/mail');
+  mailReady = m.configured;
+  $('mailStatus').innerHTML = m.configured
+    ? '<span class="pill active">شغّال ✓</span> الإيميلات عم تنبعت.'
+    : '<span class="pill revoked">مش مفعّل</span> لازم تحط السر <b class="mono">RESEND_API_KEY</b> بـ Cloudflare (Worker ← Settings ← Variables and Secrets).';
+}
+
 async function enter() {
   adminKey = $('adminKey').value.trim() || adminKey;
   try {
@@ -308,12 +336,23 @@ async function enter() {
     $('login').classList.add('hidden'); $('app').classList.remove('hidden');
     const { publicKey } = await (await fetch('/api/licenses/public-key')).json();
     $('publicKey').textContent = publicKey;
-    await Promise.all([loadRequests(), loadPlans(), loadTrials()]);
+    await Promise.all([loadRequests(), loadPlans(), loadTrials(), loadMail()]);
   } catch (e) { show(errMsg(e), false); }
 }
 $('reqFilter').onchange = () => loadRequests().catch((e) => show(errMsg(e), false));
 $('msgAllBtn').onclick = () => openComposer('*', '👥 كل الأجهزة يلي بعدها بالتجربة');
 $('msgCancel').onclick = () => { $('composer').classList.add('hidden'); $('msgText').value = ''; };
+$('msgEmail').onchange = () => $('msgSubject').classList.toggle('hidden', !$('msgEmail').checked);
+$('mailSend').onclick = async () => {
+  const body = { to: $('mailTo').value.trim(), from: $('mailFrom').value, subject: $('mailSubject').value.trim(), text: $('mailText').value.trim() };
+  if (!body.to || !body.subject || !body.text) return show('عبّي الإيميل والعنوان والرسالة', false);
+  const btn = $('mailSend'); btn.disabled = true;
+  try {
+    const r = await api('/api/admin/mail', { method: 'POST', body: JSON.stringify(body) });
+    show('انبعت الإيميل من ' + r.from);
+    $('mailSubject').value = ''; $('mailText').value = '';
+  } catch (e) { show(errMsg(e), false); } finally { btn.disabled = false; }
+};
 $('sentToggle').onclick = async () => {
   const box = $('sentList');
   if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
@@ -323,9 +362,12 @@ $('msgSend').onclick = async () => {
   const text = $('msgText').value.trim();
   if (!text || !msgTo) return show('اكتب الرسالة أوّل', false);
   try {
-    await api('/api/admin/trials/messages', { method: 'POST', body: JSON.stringify({ deviceId: msgTo, text }) });
-    show(msgTo === '*' ? 'انبعتت لكل يلي عم يجرّبوا. بتطلع عندن أول ما يفتحوا البرنامج' : 'انبعتت. بتطلع عندو أول ما يفتح البرنامج');
-    $('composer').classList.add('hidden'); $('msgText').value = '';
+    const email = $('msgEmail').checked;
+    const r = await api('/api/admin/trials/messages', { method: 'POST', body: JSON.stringify({ deviceId: msgTo, text, email, subject: $('msgSubject').value.trim() }) });
+    let note = msgTo === '*' ? 'انبعتت لكل يلي عم يجرّبوا. بتطلع عندن أول ما يفتحوا البرنامج' : 'انبعتت. بتطلع عندو أول ما يفتح البرنامج';
+    if (email) note += r.emailTargets ? ' · 📧 انبعت ' + r.emailed + ' من ' + r.emailTargets + ' إيميل' + (r.emailError ? ' (' + mailError(r.emailError) + ')' : '') : ' · 📧 ما في إيميل مسجّل';
+    show(note, !email || !r.emailError);
+    $('composer').classList.add('hidden'); $('msgText').value = ''; $('msgSubject').value = '';
     loadTrials(); if (!$('sentList').classList.contains('hidden')) loadSent();
   } catch (e) { show(errMsg(e), false); }
 };
@@ -364,7 +406,7 @@ document.addEventListener('click', async (e) => {
   if (t.dataset.approve) {
     const n = prompt('كم جهاز مسموح لهالزبون؟ (1 - 20)', '1');
     if (n !== null) {
-      try { const { license } = await api('/api/admin/requests/' + encodeURIComponent(t.dataset.approve) + '/approve', { method: 'POST', body: JSON.stringify({ maxDevices: Number(n) || 1 }) }); show('تمت الموافقة. المفتاح ' + license.key + ' رح يتفعّل عند الزبون لحالو'); loadRequests(); load(); }
+      try { const r = await api('/api/admin/requests/' + encodeURIComponent(t.dataset.approve) + '/approve', { method: 'POST', body: JSON.stringify({ maxDevices: Number(n) || 1 }) }); const license = r.license; show('تمت الموافقة. المفتاح ' + license.key + ' رح يتفعّل عند الزبون لحالو' + (r.emailed ? ' · 📧 وانبعتلو بالإيميل' : r.emailError === 'mail_not_configured' ? '' : ' · ما انبعت الإيميل (' + mailError(r.emailError) + ')')); loadRequests(); load(); }
       catch (err) { show(errMsg(err), false); }
     }
   }
@@ -400,6 +442,10 @@ document.addEventListener('click', async (e) => {
       try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.email) + '/email', { method: 'POST', body: JSON.stringify({ email: v }) }); show('تم حفظ الإيميل'); load(); }
       catch (err) { show(errMsg(err), false); }
     }
+  }
+  if (t.dataset.sendKey && confirm('ابعت المفتاح ' + t.dataset.sendKey + ' بالإيميل لـ ' + t.dataset.to + '؟ (من info@beecash.app)')) {
+    try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.sendKey) + '/send-email', { method: 'POST' }); show('📧 انبعت المفتاح لـ ' + t.dataset.to); }
+    catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.msgDevice) openComposer(t.dataset.msgDevice, '🏪 ' + t.dataset.msgLabel);
   if (t.dataset.template !== undefined && MSG_TEMPLATES[t.dataset.template]) $('msgText').value = MSG_TEMPLATES[t.dataset.template][1];
