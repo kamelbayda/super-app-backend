@@ -269,10 +269,11 @@ async function loadPlans() {
 }
 
 const MSG_TEMPLATES = [
-  ['👋 ترحيب', 'أهلاً وسهلاً {name} 👋 شكراً لتجربتك BeeCash في {shop}. نحن هنا لمساعدتك في أي وقت إذا احتجت إلى أي دعم في التشغيل. وعندما تكون جاهزاً، يتيح لك الاشتراك استخدام البرنامج بلا حدود 🚀'],
-  ['⏳ اقتراب نهاية التجربة', 'مرحباً {name} 🙌 لم يتبقَّ لك سوى {left} فواتير في الفترة التجريبية المجانية. اشترك الآن لتبقى فواتيرك ومخزونك وحساباتك تعمل دون أي انقطاع في متجرك ✅'],
-  ['🎁 عرض خاص', 'عرض خاص لك يا {name} 🎁 عند الاشتراك خلال هذا الأسبوع تحصل على خصم خاص على اشتراك {shop}. اضغط على "اشترك الآن" وأرسل طلبك 🐝'],
-  ['☁️ مزايا الاشتراك', 'مع اشتراك BeeCash يا {name} تحصل على: فواتير غير محدودة، ومزامنة بين عدة أجهزة، ونسخ احتياطي على السحابة، وتحديثات مستمرة. لا تدع تجربة {shop} تتوقف هنا 💪'],
+  // [button, message, email subject]
+  ['👋 ترحيب', 'أهلاً وسهلاً {name} 👋 شكراً لتجربتك BeeCash في {shop}. نحن هنا لمساعدتك في أي وقت إذا احتجت إلى أي دعم في التشغيل. وعندما تكون جاهزاً، يتيح لك الاشتراك استخدام البرنامج بلا حدود 🚀', 'أهلاً بك في BeeCash يا {name} 👋'],
+  ['⏳ اقتراب نهاية التجربة', 'مرحباً {name} 🙌 لم يتبقَّ لك سوى {left} فواتير في الفترة التجريبية المجانية. اشترك الآن لتبقى فواتيرك ومخزونك وحساباتك تعمل دون أي انقطاع في متجرك ✅', 'بقي لك {left} فواتير فقط في التجربة المجانية ⏳'],
+  ['🎁 عرض خاص', 'عرض خاص لك يا {name} 🎁 عند الاشتراك خلال هذا الأسبوع تحصل على خصم خاص على اشتراك {shop}. اضغط على "اشترك الآن" وأرسل طلبك 🐝', 'عرض خاص لـ {shop} لفترة محدودة 🎁'],
+  ['☁️ مزايا الاشتراك', 'مع اشتراك BeeCash يا {name} تحصل على: فواتير غير محدودة، ومزامنة بين عدة أجهزة، ونسخ احتياطي على السحابة، وتحديثات مستمرة. لا تدع تجربة {shop} تتوقف هنا 💪', 'ما الذي ينتظرك مع اشتراك BeeCash يا {name}؟'],
 ];
 let msgTo = null;
 function openComposer(deviceId, label) {
@@ -448,7 +449,11 @@ document.addEventListener('click', async (e) => {
     catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.msgDevice) openComposer(t.dataset.msgDevice, '🏪 ' + t.dataset.msgLabel);
-  if (t.dataset.template !== undefined && MSG_TEMPLATES[t.dataset.template]) $('msgText').value = MSG_TEMPLATES[t.dataset.template][1];
+  if (t.dataset.template !== undefined && MSG_TEMPLATES[t.dataset.template]) {
+    const [, text, subject] = MSG_TEMPLATES[t.dataset.template];
+    $('msgText').value = text;
+    $('msgSubject').value = subject; // still editable
+  }
   if (t.dataset.delMsg && confirm('حذف هالرسالة؟ إذا بعدها ما انقرأت ما رح تطلع عند الزبون.')) {
     try { await api('/api/admin/trials/messages/' + encodeURIComponent(t.dataset.delMsg) + '/delete', { method: 'POST' }); loadSent(); loadTrials(); }
     catch (err) { show(errMsg(err), false); }
