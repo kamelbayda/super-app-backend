@@ -106,6 +106,18 @@ function prepare(env) {
           last_seen_at INTEGER,
           PRIMARY KEY (key, device_id)
         )`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS trial_messages (
+          id TEXT PRIMARY KEY,
+          device_id TEXT NOT NULL,
+          text TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS trial_message_reads (
+          message_id TEXT NOT NULL,
+          device_id TEXT NOT NULL,
+          read_at INTEGER NOT NULL,
+          PRIMARY KEY (message_id, device_id)
+        )`),
         env.DB.prepare(`CREATE TABLE IF NOT EXISTS trial_devices (
           device_id TEXT PRIMARY KEY,
           shop_uid TEXT,
@@ -342,10 +354,39 @@ async function trialPing(request, env) {
   return json({ ok: true });
 }
 
+// Messages from the admin to a device on trial (device_id '*' = every device still on trial).
+// The app checks its inbox now and then and shows them with a "subscribe" button.
+async function trialInbox(request, env, url) {
+  const deviceId = String(url.searchParams.get('deviceId') || '').trim().slice(0, 100);
+  if (!deviceId) return fail(400, 'bad_request');
+  await prepare(env);
+  const dev = await env.DB.prepare(`SELECT license_key, first_seen_at FROM trial_devices WHERE device_id = ?`).bind(deviceId).first();
+  const { results } = await env.DB.prepare(
+    `SELECT m.id, m.text, m.created_at FROM trial_messages m
+     WHERE (m.device_id = ? OR (m.device_id = '*' AND ? = 1))
+       AND NOT EXISTS (SELECT 1 FROM trial_message_reads r WHERE r.message_id = m.id AND r.device_id = ?)
+     ORDER BY m.created_at LIMIT 5`
+  ).bind(deviceId, dev && !dev.license_key ? 1 : 0, deviceId).all();
+  return json({ ok: true, messages: results.map((m) => ({ id: m.id, text: m.text, createdAt: new Date(m.created_at).toISOString() })) });
+}
+
+async function trialMessageRead(request, env, id) {
+  const body = await request.json().catch(() => ({}));
+  const deviceId = String(body.deviceId || '').trim().slice(0, 100);
+  if (!deviceId) return fail(400, 'bad_request');
+  await prepare(env);
+  const msg = await env.DB.prepare(`SELECT device_id FROM trial_messages WHERE id = ?`).bind(id).first();
+  if (!msg || (msg.device_id !== '*' && msg.device_id !== deviceId)) return fail(404, 'not_found');
+  await env.DB.prepare(`INSERT OR IGNORE INTO trial_message_reads (message_id, device_id, read_at) VALUES (?, ?, ?)`).bind(id, deviceId, Date.now()).run();
+  return json({ ok: true });
+}
+
 const trialPublic = (r) => ({
   deviceId: r.device_id, shopUid: r.shop_uid, shopName: r.shop_name, businessType: r.business_type,
   ownerName: r.owner_name, ownerEmail: r.owner_email, ownerPhone: r.owner_phone, deviceLabel: r.device_label,
   invoicesUsed: r.invoices_used, licenseKey: r.license_key, country: r.country,
+  messagesSent: r.messages_sent ?? 0, messagesRead: r.messages_read ?? 0,
+  lastMessageAt: r.last_message_at ? new Date(r.last_message_at).toISOString() : null,
   firstSeenAt: new Date(r.first_seen_at).toISOString(), lastSeenAt: new Date(r.last_seen_at).toISOString(),
 });
 
@@ -468,9 +509,40 @@ async function admin(request, env, path) {
       args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
     }
     const { results } = await env.DB.prepare(
-      `SELECT * FROM trial_devices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY last_seen_at DESC LIMIT 500`
+      `SELECT t.*,
+         (SELECT COUNT(*) FROM trial_messages m WHERE m.device_id = t.device_id OR (m.device_id = '*' AND t.license_key IS NULL)) AS messages_sent,
+         (SELECT COUNT(*) FROM trial_message_reads r WHERE r.device_id = t.device_id) AS messages_read,
+         (SELECT MAX(m.created_at) FROM trial_messages m WHERE m.device_id = t.device_id OR (m.device_id = '*' AND t.license_key IS NULL)) AS last_message_at
+       FROM trial_devices t ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY last_seen_at DESC LIMIT 500`
     ).bind(...args).all();
     return json({ ok: true, trials: results.map(trialPublic) });
+  }
+  // Send a message to one device on trial, or to all of them (deviceId '*')
+  if (path === '/api/admin/trials/messages' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const text = String(body.text || '').trim().slice(0, 1000);
+    const deviceId = String(body.deviceId || '').trim().slice(0, 100);
+    if (!text || !deviceId) return fail(400, 'bad_request');
+    const id = crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO trial_messages (id, device_id, text, created_at) VALUES (?, ?, ?, ?)`).bind(id, deviceId, text, Date.now()).run();
+    return json({ ok: true, id });
+  }
+  if (path === '/api/admin/trials/messages' && request.method === 'GET') {
+    const { results } = await env.DB.prepare(
+      `SELECT m.*, (SELECT COUNT(*) FROM trial_message_reads r WHERE r.message_id = m.id) AS reads,
+         (SELECT shop_name FROM trial_devices t WHERE t.device_id = m.device_id) AS shop_name
+       FROM trial_messages m ORDER BY m.created_at DESC LIMIT 100`
+    ).all();
+    return json({ ok: true, messages: results.map((m) => ({ id: m.id, deviceId: m.device_id, shopName: m.shop_name ?? null, text: m.text, reads: m.reads, createdAt: new Date(m.created_at).toISOString() })) });
+  }
+  const msgDel = path.match(/^\/api\/admin\/trials\/messages\/([^/]+)\/delete$/);
+  if (msgDel && request.method === 'POST') {
+    const id = decodeURIComponent(msgDel[1]);
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM trial_messages WHERE id = ?`).bind(id),
+      env.DB.prepare(`DELETE FROM trial_message_reads WHERE message_id = ?`).bind(id),
+    ]);
+    return json({ ok: true });
   }
   const trialDel = path.match(/^\/api\/admin\/trials\/([^/]+)\/delete$/);
   if (trialDel && request.method === 'POST') {
@@ -597,6 +669,9 @@ export default {
       }
       if (path === '/api/requests' && request.method === 'POST') return await createRequest(request, env);
       if (path === '/api/trials/ping' && request.method === 'POST') return await trialPing(request, env);
+      if (path === '/api/trials/inbox' && request.method === 'GET') return await trialInbox(request, env, url);
+      const readM = path.match(/^\/api\/trials\/messages\/([^/]+)\/read$/);
+      if (readM && request.method === 'POST') return await trialMessageRead(request, env, decodeURIComponent(readM[1]));
       const reqStatus = path.match(/^\/api\/requests\/([A-Za-z0-9_-]+)$/);
       if (reqStatus && request.method === 'GET') return await requestStatus(env, reqStatus[1], url.searchParams.get('secret') || '');
       if (path.startsWith('/api/admin/')) return await admin(request, env, path);
