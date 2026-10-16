@@ -78,6 +78,18 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
         <select id="trialFilter" style="flex:0 1 200px"><option value="trial">بالتجربة بس</option><option value="">الكل</option><option value="licensed">المشتركين</option></select>
         <input id="trialQ" placeholder="بحث: محل، إيميل، اسم، تلفون" style="flex:1 1 200px">
       </div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="secondary" id="msgAllBtn">💬 رسالة لكل يلي عم يجرّبوا</button>
+        <button class="secondary" id="sentToggle">📨 الرسائل المرسلة</button>
+      </div>
+      <div id="composer" class="hidden" style="border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px">
+        <div style="margin-bottom:6px"><b>رسالة إلى: <span id="msgTarget"></span></b></div>
+        <div class="row" style="margin-bottom:6px;gap:6px;flex-wrap:wrap" id="msgTemplates"></div>
+        <textarea id="msgText" rows="4" style="width:100%;box-sizing:border-box" placeholder="اكتب رسالتك..."></textarea>
+        <p class="muted" style="margin:4px 0 8px">بتطلع عند الزبون جوّا البرنامج مع زر "⭐ اشترك الآن". فيك تكتب <b>{name}</b> لاسم صاحب المحل، <b>{shop}</b> لاسم المحل، <b>{left}</b> لعدد الفواتير الباقية من التجربة.</p>
+        <div class="row" style="gap:6px"><button id="msgSend">إرسال</button><button class="secondary" id="msgCancel">إلغاء</button></div>
+      </div>
+      <div id="sentList" class="hidden" style="margin-bottom:10px"></div>
       <div id="trials"></div>
     </section>
 
@@ -237,6 +249,31 @@ async function loadPlans() {
   $('paymentInfo').value = plans.paymentInfo || '';
 }
 
+const MSG_TEMPLATES = [
+  ['👋 ترحيب', 'أهلاً {name} 👋 شكراً إنك عم تجرّب BeeCash بـ {shop}. إذا بدّك أي مساعدة بالتشغيل نحنا حاضرين. وقت ما تكون جاهز، الاشتراك بيخلّي البرنامج يشتغل بلا حدود 🚀'],
+  ['⏳ قرّبت التجربة تخلص', 'مرحبا {name} 🙌 باقيلك {left} فواتير بس من التجربة المجانية. اشترك هلّق تاتضل فواتيرك ومخزونك وحساباتك شغّالة بلا ما يوقف شي بالمحل ✅'],
+  ['🎁 عرض خاص', 'عرض خاص إلك {name} 🎁 إذا اشتركت هالأسبوع بتاخد خصم خاص على اشتراك {shop}. اكبس "اشترك الآن" وابعتلنا طلبك 🐝'],
+  ['☁️ مزايا الاشتراك', 'مع اشتراك BeeCash يا {name}: فواتير بلا حدود، مزامنة على كذا جهاز، نسخ احتياطي على السحاب، وتحديثات مستمرة. لا تخلّي تجربة {shop} توقف هون 💪'],
+];
+let msgTo = null;
+function openComposer(deviceId, label) {
+  msgTo = deviceId;
+  $('msgTarget').textContent = label;
+  $('msgTemplates').innerHTML = MSG_TEMPLATES.map((t, i) => '<button class="secondary" data-template="' + i + '">' + esc(t[0]) + '</button>').join('');
+  $('composer').classList.remove('hidden');
+  $('msgText').focus();
+  $('composer').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+async function loadSent() {
+  const { messages } = await api('/api/admin/trials/messages');
+  $('sentList').innerHTML = messages.map((m) =>
+    '<div class="dev"><div><div>' + esc(m.text) + '</div><div class="muted">' +
+      (m.deviceId === '*' ? '👥 لكل يلي عم يجرّبوا' : '🏪 ' + esc(m.shopName || 'جهاز')) + ' · ' + ago(m.createdAt) +
+      ' · ' + (m.reads ? '✓ انقرأت (' + m.reads + ')' : '⏳ بعدها ما انقرأت') + '</div></div>' +
+    '<button class="danger" data-del-msg="' + esc(m.id) + '">🗑️</button></div>'
+  ).join('') || '<p class="muted">ما بعتّ رسائل بعد.</p>';
+}
+
 const FLAG = (c) => c && c.length === 2 ? String.fromCodePoint(...[...c.toUpperCase()].map((x) => 127397 + x.charCodeAt(0))) : '';
 async function loadTrials() {
   const f = $('trialFilter').value; const q = $('trialQ').value.trim();
@@ -252,8 +289,10 @@ async function loadTrials() {
         (fresh ? ' <span class="pill active">نشط اليوم</span>' : '') + '</div>' +
       '<div class="muted">' + (t.ownerName ? '👤 ' + esc(t.ownerName) + ' · ' : '') + (t.ownerEmail ? '<span dir="ltr">📧 ' + esc(t.ownerEmail) + '</span> · ' : '') +
         (t.ownerPhone ? '<span dir="ltr">📞 ' + esc(t.ownerPhone) + '</span> · ' : '') + '💻 ' + esc(t.deviceLabel || 'جهاز') + (t.country ? ' · ' + FLAG(t.country) + ' ' + esc(t.country) : '') + '</div>' +
+      (t.messagesSent ? '<div class="muted">💬 ' + t.messagesSent + ' رسالة · ' + (t.messagesRead >= t.messagesSent ? '✓ قراهن كلّن' : '✓ قرا ' + t.messagesRead) + ' · آخر رسالة ' + ago(t.lastMessageAt) + '</div>' : '') +
       '<div class="muted">أول مرّة: ' + date(t.firstSeenAt) + ' · آخر مرّة: ' + ago(t.lastSeenAt) + (t.licenseKey ? ' · <span class="mono">' + esc(t.licenseKey) + '</span>' : '') + '</div>' +
       '</div><div class="actions">' +
+        (!t.licenseKey ? '<button class="secondary" data-msg-device="' + esc(t.deviceId) + '" data-msg-label="' + esc(t.shopName || 'جهاز') + '">💬 رسالة</button>' : '') +
         (t.ownerEmail ? '<button class="secondary" data-copy="' + esc(t.ownerEmail) + '">نسخ الإيميل</button>' : '') +
         (wa ? '<a class="secondary btnlink" href="' + esc(wa) + '" target="_blank" rel="noopener">واتساب</a>' : '') +
         '<button class="danger" data-del-trial="' + esc(t.deviceId) + '">🗑️</button>' +
@@ -273,6 +312,23 @@ async function enter() {
   } catch (e) { show(errMsg(e), false); }
 }
 $('reqFilter').onchange = () => loadRequests().catch((e) => show(errMsg(e), false));
+$('msgAllBtn').onclick = () => openComposer('*', '👥 كل الأجهزة يلي بعدها بالتجربة');
+$('msgCancel').onclick = () => { $('composer').classList.add('hidden'); $('msgText').value = ''; };
+$('sentToggle').onclick = async () => {
+  const box = $('sentList');
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  try { await loadSent(); box.classList.remove('hidden'); } catch (e) { show(errMsg(e), false); }
+};
+$('msgSend').onclick = async () => {
+  const text = $('msgText').value.trim();
+  if (!text || !msgTo) return show('اكتب الرسالة أوّل', false);
+  try {
+    await api('/api/admin/trials/messages', { method: 'POST', body: JSON.stringify({ deviceId: msgTo, text }) });
+    show(msgTo === '*' ? 'انبعتت لكل يلي عم يجرّبوا. بتطلع عندن أول ما يفتحوا البرنامج' : 'انبعتت. بتطلع عندو أول ما يفتح البرنامج');
+    $('composer').classList.add('hidden'); $('msgText').value = '';
+    loadTrials(); if (!$('sentList').classList.contains('hidden')) loadSent();
+  } catch (e) { show(errMsg(e), false); }
+};
 $('trialFilter').onchange = () => loadTrials().catch((e) => show(errMsg(e), false));
 $('trialQ').oninput = () => { clearTimeout(loadTrials.t); loadTrials.t = setTimeout(() => loadTrials().catch(() => {}), 300); };
 $('savePlansBtn').onclick = async () => {
@@ -344,6 +400,12 @@ document.addEventListener('click', async (e) => {
       try { await api('/api/admin/licenses/' + encodeURIComponent(t.dataset.email) + '/email', { method: 'POST', body: JSON.stringify({ email: v }) }); show('تم حفظ الإيميل'); load(); }
       catch (err) { show(errMsg(err), false); }
     }
+  }
+  if (t.dataset.msgDevice) openComposer(t.dataset.msgDevice, '🏪 ' + t.dataset.msgLabel);
+  if (t.dataset.template !== undefined && MSG_TEMPLATES[t.dataset.template]) $('msgText').value = MSG_TEMPLATES[t.dataset.template][1];
+  if (t.dataset.delMsg && confirm('حذف هالرسالة؟ إذا بعدها ما انقرأت ما رح تطلع عند الزبون.')) {
+    try { await api('/api/admin/trials/messages/' + encodeURIComponent(t.dataset.delMsg) + '/delete', { method: 'POST' }); loadSent(); loadTrials(); }
+    catch (err) { show(errMsg(err), false); }
   }
   if (t.dataset.delTrial && confirm('شيل هالجهاز من لائحة التجربة؟ (إذا رجع فتح البرنامج بيرجع يبيّن)')) {
     try { await api('/api/admin/trials/' + encodeURIComponent(t.dataset.delTrial) + '/delete', { method: 'POST' }); loadTrials(); }

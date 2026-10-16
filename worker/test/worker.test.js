@@ -236,6 +236,33 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post('/api/admin/trials/trial-1/delete', {}, admin)).status, 404);
   });
 
+  await t.test('admin messages reach devices on trial and come back as read', async () => {
+    const ip = { 'cf-connecting-ip': '10.9.9.5' };
+    const get = async (p, h = {}) => (await fetch(BASE + p, { headers: h })).json();
+    await post('/api/trials/ping', { deviceId: 'msg-trial', shopName: 'Trial Shop', businessType: 'phones' }, ip);
+    await post('/api/trials/ping', { deviceId: 'msg-paid', shopName: 'Paid Shop', licenseKey: 'POS-AAAAA-BBBBB-CCCCC' }, ip);
+    assert.equal((await post('/api/admin/trials/messages', { deviceId: 'msg-trial', text: 'hi' })).status, 401);
+    const one = await post('/api/admin/trials/messages', { deviceId: 'msg-trial', text: 'مرحبا {name}، اشترك هلّق' }, admin);
+    assert.equal(one.status, 200);
+    await post('/api/admin/trials/messages', { deviceId: '*', text: 'عرض لكل يلي عم يجرّبوا' }, admin);
+    const inbox = await get('/api/trials/inbox?deviceId=msg-trial');
+    assert.deepEqual(inbox.messages.map((m) => m.text), ['مرحبا {name}، اشترك هلّق', 'عرض لكل يلي عم يجرّبوا']);
+    // a subscribed device does not get the "all trials" message
+    assert.deepEqual((await get('/api/trials/inbox?deviceId=msg-paid')).messages, []);
+    // another device cannot mark someone else's message read
+    assert.equal((await post(`/api/trials/messages/${one.body.id}/read`, { deviceId: 'msg-paid' })).status, 404);
+    assert.equal((await post(`/api/trials/messages/${one.body.id}/read`, { deviceId: 'msg-trial' })).status, 200);
+    assert.deepEqual((await get('/api/trials/inbox?deviceId=msg-trial')).messages.map((m) => m.text), ['عرض لكل يلي عم يجرّبوا']);
+    const row = (await get('/api/admin/trials?status=trial', admin)).trials.find((x) => x.deviceId === 'msg-trial');
+    assert.equal(row.messagesSent, 2);
+    assert.equal(row.messagesRead, 1);
+    const sent = (await get('/api/admin/trials/messages', admin)).messages;
+    assert.equal(sent.find((m) => m.id === one.body.id).reads, 1);
+    assert.equal(sent.find((m) => m.id === one.body.id).shopName, 'Trial Shop');
+    await post(`/api/admin/trials/messages/${one.body.id}/delete`, {}, admin);
+    assert.ok(!(await get('/api/admin/trials/messages', admin)).messages.some((m) => m.id === one.body.id));
+  });
+
   await t.test('keys bound before multi-device support keep their device', async () => {
     const key = 'POS-LEGAC-YKEY2-34567';
     sql(`INSERT INTO licenses (key, plan, device_id, created_at, activated_at, expires_at, max_devices) VALUES ('${key}', 'life', 'old-pc', 1, 1, NULL, 1)`);
