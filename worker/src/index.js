@@ -137,6 +137,19 @@ function prepare(env) {
           first_seen_at INTEGER NOT NULL,
           last_seen_at INTEGER NOT NULL
         )`),
+        // Every email the server tried to send (kind: trial | key | free), shown on the admin page
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS email_log (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          sender TEXT NOT NULL,
+          recipient TEXT NOT NULL,
+          subject TEXT,
+          status TEXT NOT NULL,
+          error TEXT,
+          message_id TEXT,
+          created_at INTEGER NOT NULL
+        )`),
+        env.DB.prepare(`CREATE INDEX IF NOT EXISTS email_log_message ON email_log (message_id)`),
       ]);
       await migrate(env);
       return loadSigningKey(env);
@@ -171,6 +184,10 @@ async function migrate(env) {
   }
   if (!devCols.some((c) => c.name === 'shop_name')) {
     await env.DB.prepare(`ALTER TABLE license_devices ADD COLUMN shop_name TEXT`).run().catch(() => {});
+  }
+  const { results: msgCols } = await env.DB.prepare(`PRAGMA table_info(trial_messages)`).all();
+  if (!msgCols.some((c) => c.name === 'email_subject')) {
+    await env.DB.prepare(`ALTER TABLE trial_messages ADD COLUMN email_subject TEXT`).run().catch(() => {});
   }
   await env.DB.prepare(
     `INSERT OR IGNORE INTO license_devices (key, device_id, first_seen_at, last_seen_at)
@@ -442,6 +459,18 @@ async function requestStatus(env, id, secret) {
   return json({ ok: true, status: r.status, period: r.period, businessType: r.business_type, licenseKey: r.status === 'approved' ? r.license_key : null });
 }
 
+/** sendMail, and a row in email_log when it was really attempted (not when mail is not set up) */
+async function sendLogged(env, mail, { kind, messageId = null }) {
+  const r = await sendMail(env, mail);
+  if (r.reason !== 'mail_not_configured') {
+    await env.DB.prepare(
+      `INSERT INTO email_log (id, kind, sender, recipient, subject, status, error, message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(crypto.randomUUID(), kind, (SENDERS[mail.from] || SENDERS.info).address, mail.to, mail.subject ?? null,
+      r.sent ? 'sent' : 'failed', r.sent ? null : r.reason, messageId, Date.now()).run().catch((e) => console.error('email log', e));
+  }
+  return r;
+}
+
 const TRIAL_LIMIT = 15; // free invoices in the app's trial (POS src/lib/trial.ts)
 const MAX_EMAILS_PER_SEND = 90; // Resend's free plan sends 100 a day
 const PERIOD_NAMES = { month: 'شهر واحد', year: 'سنة كاملة', life: 'مدى الحياة' };
@@ -451,7 +480,7 @@ const TYPE_NAMES = { supermarket: 'سوبرماركت', phones: 'محل هوات
 function mailKey(env, lic, { name, shop, to }) {
   if (!to) return { sent: false, reason: 'no_email' };
   const expires = lic.expires_at ? new Date(lic.expires_at).toISOString().slice(0, 10) : null;
-  return sendMail(env, {
+  return sendLogged(env, {
     from: 'info', to,
     subject: 'مفتاح تفعيل BeeCash الخاص بك',
     text: `مرحباً ${name || 'عزيزنا'}،\n\nشكراً لاشتراكك في BeeCash. هذا مفتاح التفعيل الخاص بـ${shop ? ` «${shop}»` : 'متجرك'}:`,
@@ -461,7 +490,7 @@ function mailKey(env, lic, { name, shop, to }) {
       'للتفعيل: افتح البرنامج على https://beecash.app، ثم أدخل المفتاح في خانة مفتاح التفعيل.',
       `المفتاح خاص بمتجر واحد، فاحتفظ به ولا تشاركه. لأي استفسار أو مشكلة راسلنا على ${SENDERS.support.address}.`,
     ].join('\n\n'),
-  });
+  }, { kind: 'key' });
 }
 
 // ---------- admin endpoints ----------
@@ -560,10 +589,11 @@ async function admin(request, env, path) {
         : `SELECT owner_email, owner_name, shop_name, invoices_used FROM trial_devices WHERE device_id = ? AND owner_email IS NOT NULL`
     ).bind(...(deviceId === '*' ? [] : [deviceId])).all();
     const subject = String(body.subject || '').trim().slice(0, 150) || 'رسالة من BeeCash';
+    await env.DB.prepare(`UPDATE trial_messages SET email_subject = ? WHERE id = ?`).bind(subject, id).run();
     let emailed = 0, reason = targets.length ? null : 'no_email';
     for (const t of targets) {
       const fill = (v) => fillPlaceholders(v, { name: t.owner_name, shop: t.shop_name, left: Math.max(0, TRIAL_LIMIT - (t.invoices_used || 0)) });
-      const r = await sendMail(env, { from: 'sales', to: t.owner_email, subject: fill(subject), text: fill(text) });
+      const r = await sendLogged(env, { from: 'sales', to: t.owner_email, subject: fill(subject), text: fill(text) }, { kind: 'trial', messageId: id });
       if (r.sent) emailed++; else reason = r.reason;
     }
     return json({ ok: true, id, emailed, emailTargets: targets.length, emailError: targets.length && emailed === targets.length ? null : reason });
@@ -571,10 +601,16 @@ async function admin(request, env, path) {
   if (path === '/api/admin/trials/messages' && request.method === 'GET') {
     const { results } = await env.DB.prepare(
       `SELECT m.*, (SELECT COUNT(*) FROM trial_message_reads r WHERE r.message_id = m.id) AS reads,
-         (SELECT shop_name FROM trial_devices t WHERE t.device_id = m.device_id) AS shop_name
+         (SELECT shop_name FROM trial_devices t WHERE t.device_id = m.device_id) AS shop_name,
+         (SELECT COUNT(*) FROM email_log e WHERE e.message_id = m.id AND e.status = 'sent') AS emailed,
+         (SELECT COUNT(*) FROM email_log e WHERE e.message_id = m.id AND e.status = 'failed') AS email_failed,
+         m.email_subject
        FROM trial_messages m ORDER BY m.created_at DESC LIMIT 100`
     ).all();
-    return json({ ok: true, messages: results.map((m) => ({ id: m.id, deviceId: m.device_id, shopName: m.shop_name ?? null, text: m.text, reads: m.reads, createdAt: new Date(m.created_at).toISOString() })) });
+    return json({ ok: true, messages: results.map((m) => ({
+      id: m.id, deviceId: m.device_id, shopName: m.shop_name ?? null, text: m.text, reads: m.reads,
+      emailed: m.emailed, emailFailed: m.email_failed, emailSubject: m.email_subject ?? null, createdAt: new Date(m.created_at).toISOString(),
+    })) });
   }
   const msgDel = path.match(/^\/api\/admin\/trials\/messages\/([^/]+)\/delete$/);
   if (msgDel && request.method === 'POST') {
@@ -624,6 +660,13 @@ async function admin(request, env, path) {
   if (path === '/api/admin/mail' && request.method === 'GET') {
     return json({ ok: true, configured: mailConfigured(env), senders: Object.fromEntries(Object.entries(SENDERS).map(([k, v]) => [k, v.address])) });
   }
+  if (path === '/api/admin/mail/log' && request.method === 'GET') {
+    const { results } = await env.DB.prepare(`SELECT * FROM email_log ORDER BY created_at DESC LIMIT 200`).all();
+    return json({ ok: true, emails: results.map((e) => ({
+      id: e.id, kind: e.kind, from: e.sender, to: e.recipient, subject: e.subject, status: e.status, error: e.error,
+      messageId: e.message_id, createdAt: new Date(e.created_at).toISOString(),
+    })) });
+  }
   // A free email from the admin: from support@ (faults) unless another sender is chosen
   if (path === '/api/admin/mail' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
@@ -633,7 +676,7 @@ async function admin(request, env, path) {
     if (!to) return fail(400, 'bad_email');
     if (!subject || !text) return fail(400, 'bad_request');
     const from = body.from in SENDERS ? body.from : 'support';
-    const r = await sendMail(env, { from, to, subject, text });
+    const r = await sendLogged(env, { from, to, subject, text }, { kind: 'free' });
     if (!r.sent) return fail(r.reason === 'mail_not_configured' ? 503 : 502, r.reason);
     return json({ ok: true, id: r.id, from: SENDERS[from].address });
   }

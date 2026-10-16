@@ -107,7 +107,8 @@ export const ADMIN_PAGE = /* html */ `<!doctype html>
       <label for="mailSubject" style="margin-top:8px">العنوان</label><input id="mailSubject" placeholder="مثلاً: بخصوص المشكلة في الطباعة">
       <label for="mailText" style="margin-top:8px">الرسالة</label>
       <textarea id="mailText" rows="5" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--text);font:inherit;box-sizing:border-box"></textarea>
-      <div class="row" style="margin-top:10px"><button id="mailSend">إرسال الإيميل</button></div>
+      <div class="row" style="margin-top:10px"><button id="mailSend">إرسال الإيميل</button><button class="secondary" id="mailLogToggle">📨 الإيميلات المرسلة</button></div>
+      <div id="mailLog" class="hidden" style="margin-top:10px"></div>
     </section>
 
     <section class="card">
@@ -289,7 +290,13 @@ async function loadSent() {
   $('sentList').innerHTML = messages.map((m) =>
     '<div class="dev"><div><div>' + esc(m.text) + '</div><div class="muted">' +
       (m.deviceId === '*' ? '👥 لكل يلي عم يجرّبوا' : '🏪 ' + esc(m.shopName || 'جهاز')) + ' · ' + ago(m.createdAt) +
-      ' · ' + (m.reads ? '✓ انقرأت (' + m.reads + ')' : '⏳ بعدها ما انقرأت') + '</div></div>' +
+      ' · ' + (m.reads ? '✓ انقرأت (' + m.reads + ')' : '⏳ بعدها ما انقرأت') + '</div>' +
+      (m.emailed || m.emailFailed
+        ? '<div class="muted">📧 ' + (m.emailed ? 'انبعتت بالإيميل لـ ' + m.emailed + (m.emailed === 1 ? ' شخص' : ' أشخاص') : '') +
+          (m.emailFailed ? (m.emailed ? ' · ' : '') + '<span style="color:#d92d20">ما انبعتت لـ ' + m.emailFailed + '</span>' : '') +
+          (m.emailSubject ? ' · «' + esc(m.emailSubject) + '»' : '') + '</div>'
+        : '<div class="muted">📱 جوّا البرنامج بس</div>') +
+      '</div>' +
     '<button class="danger" data-del-msg="' + esc(m.id) + '">🗑️</button></div>'
   ).join('') || '<p class="muted">ما بعتّ رسائل بعد.</p>';
 }
@@ -320,6 +327,15 @@ async function loadTrials() {
   }).join('') || '<p class="muted">ما في حدا بعد.</p>';
 }
 
+const MAIL_KIND = { trial: '📣 رسالة تجربة', key: '🔑 مفتاح تفعيل', free: '✉️ إيميل' };
+async function loadMailLog() {
+  const { emails } = await api('/api/admin/mail/log');
+  $('mailLog').innerHTML = emails.map((e) =>
+    '<div class="dev"><div><div><b>' + esc(e.subject || '—') + '</b></div>' +
+    '<div class="muted">' + (MAIL_KIND[e.kind] || e.kind) + ' · إلى <span dir="ltr">' + esc(e.to) + '</span> · من <span dir="ltr">' + esc(e.from) + '</span> · ' + ago(e.createdAt) + '</div></div>' +
+    (e.status === 'sent' ? '<span class="pill active">انبعت ✓</span>' : '<span class="pill revoked" title="' + esc(mailError(e.error)) + '">ما انبعت</span>') + '</div>'
+  ).join('') || '<p class="muted">ما انبعت ولا إيميل بعد.</p>';
+}
 let mailReady = false;
 async function loadMail() {
   const m = await api('/api/admin/mail');
@@ -343,6 +359,11 @@ async function enter() {
 $('reqFilter').onchange = () => loadRequests().catch((e) => show(errMsg(e), false));
 $('msgAllBtn').onclick = () => openComposer('*', '👥 كل الأجهزة يلي بعدها بالتجربة');
 $('msgCancel').onclick = () => { $('composer').classList.add('hidden'); $('msgText').value = ''; };
+$('mailLogToggle').onclick = async () => {
+  const box = $('mailLog');
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  try { await loadMailLog(); box.classList.remove('hidden'); } catch (e) { show(errMsg(e), false); }
+};
 $('msgEmail').onchange = () => $('msgSubject').classList.toggle('hidden', !$('msgEmail').checked);
 $('mailSend').onclick = async () => {
   const body = { to: $('mailTo').value.trim(), from: $('mailFrom').value, subject: $('mailSubject').value.trim(), text: $('mailText').value.trim() };
@@ -352,6 +373,7 @@ $('mailSend').onclick = async () => {
     const r = await api('/api/admin/mail', { method: 'POST', body: JSON.stringify(body) });
     show('انبعت الإيميل من ' + r.from);
     $('mailSubject').value = ''; $('mailText').value = '';
+    if (!$('mailLog').classList.contains('hidden')) loadMailLog();
   } catch (e) { show(errMsg(e), false); } finally { btn.disabled = false; }
 };
 $('sentToggle').onclick = async () => {

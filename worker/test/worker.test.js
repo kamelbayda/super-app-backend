@@ -312,6 +312,24 @@ test('licence API on Workers', async (t) => {
     assert.equal(all.body.emailed, all.body.emailTargets - 1);
     assert.equal(mails[mark].subject, 'رسالة من BeeCash');
 
+    // the sent list shows how many got it by email, and the email log lists each one
+    const get = async (p) => (await fetch(BASE + p, { headers: admin })).json();
+    const sentList = (await get('/api/admin/trials/messages')).messages;
+    const oneRow = sentList.find((x) => x.id === one.body.id);
+    assert.equal(oneRow.emailed, 1);
+    assert.equal(oneRow.emailFailed, 0);
+    assert.equal(oneRow.emailSubject, 'عرض لـ {shop}'); // as written; each email gets its own shop
+    const allRow = sentList.find((x) => x.id === all.body.id);
+    assert.equal(allRow.emailed, all.body.emailed);
+    assert.equal(allRow.emailFailed, 1);
+    assert.equal(allRow.emailSubject, 'رسالة من BeeCash');
+    const log = (await get('/api/admin/mail/log')).emails;
+    const failed = log.find((e) => e.messageId === all.body.id && e.to === 'fail@b.co');
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.error, 'validation_error');
+    assert.equal(failed.kind, 'trial');
+    assert.equal(failed.from, 'sales@beecash.app');
+
     // without email: true nothing is mailed
     const quiet = mails.length;
     await post('/api/admin/trials/messages', { deviceId: 'mail-a', text: 'in app only' }, admin);
@@ -333,11 +351,19 @@ test('licence API on Workers', async (t) => {
     assert.equal((await post('/api/admin/mail', { to: 'x@y.co', subject: 'عرض', text: 't', from: 'sales' }, admin)).body.from, 'sales@beecash.app');
     assert.equal((await post('/api/admin/mail', { to: 'fail@y.co', subject: 's', text: 't' }, admin)).status, 502);
 
+    const freeLog = (await (await fetch(`${BASE}/api/admin/mail/log`, { headers: admin })).json()).emails.find((e) => e.to === 'x@y.co' && e.subject === 'بخصوص العطل');
+    assert.equal(freeLog.kind, 'free');
+    assert.equal(freeLog.from, 'support@beecash.app');
+    assert.equal(freeLog.status, 'sent');
+    assert.equal((await fetch(`${BASE}/api/admin/mail/log`)).status, 401);
+
     const lic = (await post('/api/admin/licenses', { period: 'year', email: 'keymail@mailtest.dev' }, admin)).body.licenses[0];
     const r = await post(`/api/admin/licenses/${lic.key}/send-email`, {}, admin);
     assert.equal(r.body.to, 'keymail@mailtest.dev');
     assert.equal(mails[mails.length - 1].from, 'BeeCash <info@beecash.app>');
     assert.ok(mails[mails.length - 1].text.includes(lic.key));
+    const keyLog = (await (await fetch(`${BASE}/api/admin/mail/log`, { headers: admin })).json()).emails.find((e) => e.to === 'keymail@mailtest.dev');
+    assert.deepEqual([keyLog.kind, keyLog.to, keyLog.from], ['key', 'keymail@mailtest.dev', 'info@beecash.app']);
     const bare = (await post('/api/admin/licenses', { period: 'year' }, admin)).body.licenses[0];
     assert.equal((await post(`/api/admin/licenses/${bare.key}/send-email`, {}, admin)).body.error, 'bad_email');
     assert.equal((await post(`/api/admin/licenses/${bare.key}/send-email`, { to: 'other@mailtest.dev' }, admin)).body.to, 'other@mailtest.dev');
