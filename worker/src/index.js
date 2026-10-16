@@ -32,9 +32,13 @@
  *
  * Trials: every install reports itself now and then (POST /api/trials/ping: shop, type, owner,
  * device, invoices used, licensed or not), so the admin page lists who is trying the program.
+ *
+ * Emails (mailer.js, needs the RESEND_API_KEY secret): trial messages may also go by email from
+ * sales@, approved subscriptions and keys go from info@, and the admin writes about faults from support@.
  */
 import { ADMIN_PAGE } from './admin-page.js';
 import { RECEIPT_PAGE, receipts } from './receipts.js';
+import { SENDERS, mailConfigured, sendMail, fillPlaceholders } from './mailer.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const YEAR_MS = 365 * DAY_MS;
@@ -438,6 +442,28 @@ async function requestStatus(env, id, secret) {
   return json({ ok: true, status: r.status, period: r.period, businessType: r.business_type, licenseKey: r.status === 'approved' ? r.license_key : null });
 }
 
+const TRIAL_LIMIT = 15; // free invoices in the app's trial (POS src/lib/trial.ts)
+const MAX_EMAILS_PER_SEND = 90; // Resend's free plan sends 100 a day
+const PERIOD_NAMES = { month: 'شهر واحد', year: 'سنة كاملة', life: 'مدى الحياة' };
+const TYPE_NAMES = { supermarket: 'سوبرماركت', phones: 'محل هواتف' };
+
+/** The activation key email, from info@ */
+function mailKey(env, lic, { name, shop, to }) {
+  if (!to) return { sent: false, reason: 'no_email' };
+  const expires = lic.expires_at ? new Date(lic.expires_at).toISOString().slice(0, 10) : null;
+  return sendMail(env, {
+    from: 'info', to,
+    subject: 'مفتاح تفعيل BeeCash الخاص بك',
+    text: `مرحباً ${name || 'عزيزنا'}،\n\nشكراً لاشتراكك في BeeCash. هذا مفتاح التفعيل الخاص بـ${shop ? ` «${shop}»` : 'متجرك'}:`,
+    highlight: lic.key,
+    after: [
+      `نوع النشاط: ${TYPE_NAMES[lic.business_type] || TYPE_NAMES.supermarket}\nمدة الاشتراك: ${PERIOD_NAMES[periodOf(lic)] || ''}${expires ? `\nينتهي في: ${expires}` : ''}`,
+      'للتفعيل: افتح البرنامج على https://beecash.app، ثم أدخل المفتاح في خانة مفتاح التفعيل.',
+      `المفتاح خاص بمتجر واحد، فاحتفظ به ولا تشاركه. لأي استفسار أو مشكلة راسلنا على ${SENDERS.support.address}.`,
+    ].join('\n\n'),
+  });
+}
+
 // ---------- admin endpoints ----------
 async function admin(request, env, path) {
   // Trim both sides: a secret pasted into the dashboard often carries a stray space or newline.
@@ -525,7 +551,22 @@ async function admin(request, env, path) {
     if (!text || !deviceId) return fail(400, 'bad_request');
     const id = crypto.randomUUID();
     await env.DB.prepare(`INSERT INTO trial_messages (id, device_id, text, created_at) VALUES (?, ?, ?, ?)`).bind(id, deviceId, text, Date.now()).run();
-    return json({ ok: true, id });
+    if (!body.email) return json({ ok: true, id });
+    // Also by email, from sales@, to the owners that gave one (one email per address)
+    const { results: targets } = await env.DB.prepare(
+      deviceId === '*'
+        ? `SELECT owner_email, MAX(owner_name) AS owner_name, MAX(shop_name) AS shop_name, MAX(invoices_used) AS invoices_used FROM trial_devices
+           WHERE license_key IS NULL AND owner_email IS NOT NULL GROUP BY owner_email ORDER BY MAX(last_seen_at) DESC LIMIT ${MAX_EMAILS_PER_SEND}`
+        : `SELECT owner_email, owner_name, shop_name, invoices_used FROM trial_devices WHERE device_id = ? AND owner_email IS NOT NULL`
+    ).bind(...(deviceId === '*' ? [] : [deviceId])).all();
+    const subject = String(body.subject || '').trim().slice(0, 150) || 'رسالة من BeeCash';
+    let emailed = 0, reason = targets.length ? null : 'no_email';
+    for (const t of targets) {
+      const fill = (v) => fillPlaceholders(v, { name: t.owner_name, shop: t.shop_name, left: Math.max(0, TRIAL_LIMIT - (t.invoices_used || 0)) });
+      const r = await sendMail(env, { from: 'sales', to: t.owner_email, subject: fill(subject), text: fill(text) });
+      if (r.sent) emailed++; else reason = r.reason;
+    }
+    return json({ ok: true, id, emailed, emailTargets: targets.length, emailError: targets.length && emailed === targets.length ? null : reason });
   }
   if (path === '/api/admin/trials/messages' && request.method === 'GET') {
     const { results } = await env.DB.prepare(
@@ -576,7 +617,39 @@ async function admin(request, env, path) {
     if (!lic) return fail(500, 'server_error');
     await env.DB.prepare(`UPDATE subscription_requests SET status = 'approved', license_key = ?, decided_at = ? WHERE id = ?`)
       .bind(lic.key, now, req.id).run();
-    return json({ ok: true, license: toPublic(lic) });
+    const mail = await mailKey(env, lic, { name: req.owner_name, shop: req.shop_name, to: req.email });
+    return json({ ok: true, license: toPublic(lic), emailed: mail.sent, emailError: mail.sent ? null : mail.reason });
+  }
+
+  if (path === '/api/admin/mail' && request.method === 'GET') {
+    return json({ ok: true, configured: mailConfigured(env), senders: Object.fromEntries(Object.entries(SENDERS).map(([k, v]) => [k, v.address])) });
+  }
+  // A free email from the admin: from support@ (faults) unless another sender is chosen
+  if (path === '/api/admin/mail' && request.method === 'POST') {
+    const body = await request.json().catch(() => ({}));
+    const to = cleanEmail(body.to);
+    const subject = String(body.subject || '').trim().slice(0, 150);
+    const text = String(body.text || '').trim().slice(0, 5000);
+    if (!to) return fail(400, 'bad_email');
+    if (!subject || !text) return fail(400, 'bad_request');
+    const from = body.from in SENDERS ? body.from : 'support';
+    const r = await sendMail(env, { from, to, subject, text });
+    if (!r.sent) return fail(r.reason === 'mail_not_configured' ? 503 : 502, r.reason);
+    return json({ ok: true, id: r.id, from: SENDERS[from].address });
+  }
+  // Emails a key to its customer (the key's email, or `to`), from info@
+  const sendKey = path.match(/^\/api\/admin\/licenses\/([^/]+)\/send-email$/);
+  if (sendKey && request.method === 'POST') {
+    const key = normalizeKey(decodeURIComponent(sendKey[1]));
+    const body = await request.json().catch(() => ({}));
+    const lic = await env.DB.prepare(`SELECT * FROM licenses WHERE key = ?`).bind(key).first();
+    if (!lic) return fail(404, 'invalid_key');
+    const to = cleanEmail(body.to) || lic.email;
+    if (!to) return fail(400, 'bad_email');
+    const req = await env.DB.prepare(`SELECT owner_name, shop_name FROM subscription_requests WHERE license_key = ?`).bind(key).first();
+    const r = await mailKey(env, lic, { name: req?.owner_name, shop: lic.shop_name || req?.shop_name, to });
+    if (!r.sent) return fail(r.reason === 'mail_not_configured' ? 503 : 502, r.reason);
+    return json({ ok: true, to });
   }
 
   // Deletes a key for good (keys nobody wants any more); an app still using it stops on its next check
